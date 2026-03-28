@@ -1,0 +1,156 @@
+name: Lunes Host Auto Login
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
+
+jobs:
+  login:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: lunes-host-auto-login
+    env:
+      TARGET_URL: ${{ secrets.TARGET_URL }}
+      LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
+      LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
+      ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
+      LOGIN_PROXY_SERVER: ${{ secrets.LOGIN_PROXY_SERVER }}
+      LOGIN_PROXY_USERNAME: ${{ secrets.LOGIN_PROXY_USERNAME }}
+      LOGIN_PROXY_PASSWORD: ${{ secrets.LOGIN_PROXY_PASSWORD }}
+      LOGIN_PROXY_BYPASS: ${{ secrets.LOGIN_PROXY_BYPASS }}
+      VMESS_URL: ${{ secrets.VMESS_URL }}
+      VLESS_URL: ${{ secrets.VLESS_URL }}
+      TROJAN_URL: ${{ secrets.TROJAN_URL }}
+      HY2_URL: ${{ secrets.HY2_URL }}
+      HYSTERIA2_URL: ${{ secrets.HYSTERIA2_URL }}
+      SINGBOX_OUTBOUND_JSON: ${{ secrets.SINGBOX_OUTBOUND_JSON }}
+      LOCAL_HTTP_PROXY_PORT: ${{ secrets.LOCAL_HTTP_PROXY_PORT }}
+      LOCAL_SOCKS_PROXY_PORT: ${{ secrets.LOCAL_SOCKS_PROXY_PORT }}
+      S5_PROXY_HOST: ${{ secrets.S5_PROXY_HOST }}
+      S5_PROXY_PORT: ${{ secrets.S5_PROXY_PORT }}
+      S5_PROXY_USERNAME: ${{ secrets.S5_PROXY_USERNAME }}
+      S5_PROXY_PASSWORD: ${{ secrets.S5_PROXY_PASSWORD }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      HEADLESS: ${{ secrets.HEADLESS }}
+      RUN_TIMEOUT_MS: ${{ secrets.RUN_TIMEOUT_MS }}
+      SUCCESS_URL_PATTERN: ${{ secrets.SUCCESS_URL_PATTERN }}
+      CI_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Decide whether 13-day interval is reached
+        id: interval_gate
+        if: github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const workflowId = 'lunes-login.yml';
+            const intervalDays = 13;
+            const now = Date.now();
+            const response = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: workflowId,
+              status: 'completed',
+              per_page: 100
+            });
+
+            const successfulRun = response.data.workflow_runs.find((run) => {
+              return run.conclusion === 'success' && run.id !== context.runId;
+            });
+
+            if (!successfulRun) {
+              core.info('No previous successful run found. Scheduled run will proceed.');
+              core.setOutput('should_run', 'true');
+              core.setOutput('reason', 'No previous successful run found');
+              return;
+            }
+
+            const previousTime = new Date(successfulRun.created_at).getTime();
+            const elapsedDays = (now - previousTime) / (1000 * 60 * 60 * 24);
+            const shouldRun = elapsedDays >= intervalDays;
+
+            core.info(`Previous successful run: ${successfulRun.created_at}`);
+            core.info(`Elapsed days: ${elapsedDays.toFixed(2)}`);
+            core.setOutput('should_run', shouldRun ? 'true' : 'false');
+            core.setOutput('reason', shouldRun
+              ? `Reached ${intervalDays}-day interval`
+              : `Only ${elapsedDays.toFixed(2)} days since last successful run`);
+
+      - name: Stop early when interval not reached
+        if: github.event_name == 'schedule' && steps.interval_gate.outputs.should_run != 'true'
+        run: |
+          echo "Skipping scheduled run. ${{ steps.interval_gate.outputs.reason }}."
+          exit 0
+
+      - name: Setup Node.js
+        if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: lunes-host-auto-login/package.json
+
+      - name: Install dependencies
+        if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
+        run: npm install
+
+      - name: Install sing-box
+        if: (github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true') && (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
+        run: |
+          set -e
+          VERSION="1.11.8"
+          ARCHIVE="sing-box-${VERSION}-linux-amd64.tar.gz"
+          URL="https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/${ARCHIVE}"
+          curl -L "$URL" -o /tmp/sing-box.tar.gz
+          mkdir -p /tmp/sing-box
+          tar -xzf /tmp/sing-box.tar.gz -C /tmp/sing-box --strip-components=1
+          sudo install /tmp/sing-box/sing-box /usr/local/bin/sing-box
+          sing-box version
+
+      - name: Generate sing-box config
+        if: (github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true') && (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
+        run: npm run generate:singbox
+
+      - name: Start sing-box proxy
+        if: (github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true') && (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
+        run: |
+          set -e
+          mkdir -p artifacts
+          nohup sing-box run -c runtime/sing-box.json > artifacts/sing-box.log 2>&1 &
+          echo $! > artifacts/sing-box.pid
+          sleep 5
+          if ! ps -p "$(cat artifacts/sing-box.pid)" > /dev/null; then
+            cat artifacts/sing-box.log
+            exit 1
+          fi
+          HTTP_PORT="${LOCAL_HTTP_PROXY_PORT:-7890}"
+          echo "LOGIN_PROXY_SERVER=http://127.0.0.1:${HTTP_PORT}" >> "$GITHUB_ENV"
+
+      - name: Install Playwright Chromium
+        if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Run login automation
+        if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
+        run: npm run login
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunes-login-artifacts
+          path: lunes-host-auto-login/artifacts
+          if-no-files-found: warn
+
+      - name: Stop sing-box
+        if: always() && (github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true') && (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
+        run: |
+          if [ -f artifacts/sing-box.pid ]; then
+            kill "$(cat artifacts/sing-box.pid)" || true
+          fi

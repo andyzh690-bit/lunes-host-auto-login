@@ -1,0 +1,17 @@
+{
+  "name": "lunes-host-auto-login",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GitHub Actions Playwright auto login for Lunes Host",
+  "main": "scripts/login.js",
+  "scripts": {
+    "login": "node scripts/login.js",
+    "generate:singbox": "node scripts/generate-singbox-config.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "playwright": "^1.54.2"
+  }
+}
