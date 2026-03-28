@@ -339,9 +339,10 @@ function buildTransport (network, options) {
   if (normalized === 'ws') {
     const pathValue = options.path || '/';
     const earlyData = extractEarlyData(pathValue);
+    const normalizedPath = removeEarlyDataQuery(pathValue);
     return removeUndefined({
       type: 'ws',
-      path: pathValue,
+      path: normalizedPath,
       headers: options.host ? { Host: options.host } : undefined,
       max_early_data: earlyData,
       early_data_header_name: earlyData ? 'Sec-WebSocket-Protocol' : undefined
@@ -387,6 +388,15 @@ function buildTransport (network, options) {
 function extractEarlyData (pathValue) {
   const match = String(pathValue).match(/[?&]ed=(\d+)/i);
   return match ? Number(match[1]) : undefined;
+}
+
+function removeEarlyDataQuery (pathValue) {
+  const input = String(pathValue || '/').trim() || '/';
+  const cleaned = input
+    .replace(/([?&])ed=\d+&?/i, '$1')
+    .replace(/[?&]$/, '');
+
+  return cleaned || '/';
 }
 
 function normalizeSecurity (value) {

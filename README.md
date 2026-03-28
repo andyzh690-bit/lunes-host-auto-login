@@ -178,3 +178,4 @@ ACCOUNTS_JSON='[{"email":"your-email@example.com","password":"your-password","na
 - If you use `VMESS_URL`, store the full `vmess://...` string as a GitHub secret named `VMESS_URL`.
 - If you use one of the sing-box node secrets, set only one of `VMESS_URL`, `VLESS_URL`, `TROJAN_URL`, `HY2_URL`, `HYSTERIA2_URL`, or `SINGBOX_OUTBOUND_JSON` per workflow run.
 - The default daily cron is `17 3 * * *`, but the actual login only runs when the 13-day interval gate allows it.
+- For `vmess://...?...ed=NNNN` links, the generator strips the `ed` query from the WebSocket path and maps it to sing-box early data fields to avoid common `404` handshake issues.
