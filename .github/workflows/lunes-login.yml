@@ -41,65 +41,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Decide whether 13-day interval is reached
-        id: interval_gate
-        if: github.event_name == 'schedule'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const workflowId = 'lunes-login.yml';
-            const intervalDays = 1;
-            const now = Date.now();
-            const response = await github.rest.actions.listWorkflowRuns({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: workflowId,
-              status: 'completed',
-              per_page: 100
-            });
-
-            const successfulRun = response.data.workflow_runs.find((run) => {
-              return run.conclusion === 'success' && run.id !== context.runId;
-            });
-
-            if (!successfulRun) {
-              core.info('No previous successful run found. Scheduled run will proceed.');
-              core.setOutput('should_run', 'true');
-              core.setOutput('reason', 'No previous successful run found');
-              return;
-            }
-
-            const previousTime = new Date(successfulRun.created_at).getTime();
-            const elapsedDays = (now - previousTime) / (1000 * 60 * 60 * 24);
-            const shouldRun = elapsedDays >= intervalDays;
-
-            core.info(`Previous successful run: ${successfulRun.created_at}`);
-            core.info(`Elapsed days: ${elapsedDays.toFixed(2)}`);
-            core.setOutput('should_run', shouldRun ? 'true' : 'false');
-            core.setOutput('reason', shouldRun
-              ? `Reached ${intervalDays}-day interval`
-              : `Only ${elapsedDays.toFixed(2)} days since last successful run`);
-
-      - name: Stop early when interval not reached
-        if: github.event_name == 'schedule' && steps.interval_gate.outputs.should_run != 'true'
-        run: |
-          echo "Skipping scheduled run. ${{ steps.interval_gate.outputs.reason }}."
-          exit 0
-
       - name: Setup Python
-        if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
+
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
+
         run: |
           pip install playwright
           playwright install firefox
 
       - name: Download Camoufox browser
-        if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
+
         run: |
           CAMOUFOX_VERSION="135.0.1-beta.24"
           curl -L -o camoufox.zip "https://github.com/daijro/camoufox/releases/download/v${CAMOUFOX_VERSION}/camoufox-${CAMOUFOX_VERSION}-lin.x86_64.zip"
@@ -175,7 +130,7 @@ jobs:
           python /tmp/generate_config.py
 
       - name: Start sing-box proxy
-        if: (github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true') && (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
+        if: (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
         run: |
           set -e
           mkdir -p artifacts
@@ -190,11 +145,9 @@ jobs:
           echo "LOGIN_PROXY_SERVER=http://127.0.0.1:${HTTP_PORT}" >> "$GITHUB_ENV"
 
       - name: Create artifacts directory
-        if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
         run: mkdir -p artifacts/screenshots
 
       - name: Run login automation (Python)
-        if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
         run: python scripts/login.py
 
       - name: Telegram Notification
@@ -226,7 +179,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Stop sing-box
-        if: always() && (github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true') && (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
+        if: always() && (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
         run: |
           if [ -f artifacts/sing-box.pid ]; then
             kill "$(cat artifacts/sing-box.pid)" || true
