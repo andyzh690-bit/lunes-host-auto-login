@@ -151,7 +151,10 @@ jobs:
         run: python scripts/login.py
 
       - name: Telegram Notification
-        if: always() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
+        if: always()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         uses: appleboy/telegram-action@master
         with:
           to_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -164,11 +167,8 @@ jobs:
             
             Account: ${{ secrets.LOGIN_EMAIL }}
             Branch: ${{ github.ref_name }}
-          debug: false
+          debug: true
           format: html
-          file: |
-            path: artifacts/screenshots/login-result.png
-            caption: Login Result
 
       - name: Upload artifacts
         if: always()
