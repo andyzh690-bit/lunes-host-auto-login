@@ -55,7 +55,9 @@ jobs:
         id: result
         run: |
           if [ -f artifacts/login-result.json ]; then
-            cat artifacts/login-result.json | jq -r '"success=\(.success)|url=\(.url)|server_id=\(.server_id)"' >> "$GITHUB_OUTPUT"
+            echo "success=$(jq -r '.success' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
+            echo "url=$(jq -r '.url' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
+            echo "server_id=$(jq -r '.server_id' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
           else
             echo "success=false" >> "$GITHUB_OUTPUT"
             echo "url=" >> "$GITHUB_OUTPUT"
