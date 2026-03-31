@@ -108,12 +108,17 @@ def login():
     print(f"浏览器: {camoufox_exe}")
     print("=" * 50)
     
+    headless = os.getenv("HEADLESS", "true").lower() == "true"
+    if not os.environ.get("DISPLAY") and sys.platform != "win32":
+        headless = True
+        print("[浏览器] 无 DISPLAY 环境变量，自动使用无头模式")
+    
     with sync_playwright() as p:
-        print("[浏览器] 启动 Camoufox...")
+        print(f"[浏览器] 启动 Camoufox (headless={headless})...")
         
         browser = p.firefox.launch(
             executable_path=camoufox_exe,
-            headless=False
+            headless=headless
         )
         
         context = browser.new_context(
