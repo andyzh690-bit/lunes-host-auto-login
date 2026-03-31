@@ -1,0 +1,87 @@
+name: CF Turnstile Bypass Login
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'  # 每天 UTC 03:00 运行
+
+jobs:
+  login:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LOGIN_URL: ${{ secrets.LOGIN_URL }}
+      LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
+      LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
+      SUCCESS_URL_PATTERN: ${{ secrets.SUCCESS_URL_PATTERN }}
+      HEADLESS: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install playwright
+          playwright install firefox
+
+      - name: Download Camoufox browser
+        run: |
+          CAMOUFOX_VERSION="135.0.1-beta.24"
+          curl -L -o camoufox.zip "https://github.com/daijro/camoufox/releases/download/v${CAMOUFOX_VERSION}/camoufox-${CAMOUFOX_VERSION}-lin.x86_64.zip"
+          unzip -o camoufox.zip -d camoufox
+          rm camoufox.zip
+          chmod +x camoufox/camoufox
+
+      - name: Create artifacts directory
+        run: mkdir -p artifacts/screenshots
+
+      - name: Run login automation
+        id: login
+        run: |
+          START_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
+          echo "start_time=$START_TIME" >> "$GITHUB_OUTPUT"
+          python template/cf-bypass-login.py
+          END_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
+          echo "end_time=$END_TIME" >> "$GITHUB_OUTPUT"
+
+      - name: Read login result
+        id: result
+        run: |
+          if [ -f artifacts/login-result.json ]; then
+            echo "success=$(jq -r '.success' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
+            echo "url=$(jq -r '.url' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
+          else
+            echo "success=false" >> "$GITHUB_OUTPUT"
+            echo "url=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Telegram Notification
+        if: always()
+        uses: appleboy/telegram-action@master
+        with:
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          message: |
+            🤖 <b>自动登录</b>
+            
+            状态: ${{ steps.result.outputs.success == 'true' && '✅ 成功' || '❌ 失败' }}
+            开始: ${{ steps.login.outputs.start_time }}
+            结束: ${{ steps.login.outputs.end_time }}
+            地址: ${{ steps.result.outputs.url }}
+          debug: false
+          format: html
+          photo: artifacts/screenshots/login-result.png
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: login-artifacts
+          path: artifacts
+          if-no-files-found: warn
