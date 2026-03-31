@@ -3,15 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "description": "GitHub Actions Playwright auto login for Lunes Host",
-  "main": "scripts/login.js",
+  "main": "scripts/login.py",
   "scripts": {
-    "login": "node scripts/login.js",
-    "generate:singbox": "node scripts/generate-singbox-config.js"
+    "login": "python scripts/login.py",
+    "login:normal": "python scripts/login-normal.py"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "playwright": "^1.54.2"
+    "playwright": "^1.53.0"
   }
 }

@@ -13,6 +13,7 @@ jobs:
       TARGET_URL: ${{ secrets.TARGET_URL }}
       LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
       LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
+      CAMOUFOX_PATH: ${{ secrets.CAMOUFOX_PATH }}
       ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
       LOGIN_PROXY_SERVER: ${{ secrets.LOGIN_PROXY_SERVER }}
       LOGIN_PROXY_USERNAME: ${{ secrets.LOGIN_PROXY_USERNAME }}
@@ -85,17 +86,26 @@ jobs:
           echo "Skipping scheduled run. ${{ steps.interval_gate.outputs.reason }}."
           exit 0
 
-      - name: Setup Node.js
+      - name: Setup Python
         if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-python@v5
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: package-lock.json
+          python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
-        run: npm install
+        run: |
+          pip install playwright
+          playwright install firefox
+
+      - name: Download Camoufox browser
+        if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
+        run: |
+          CAMOUFOX_VERSION="135.0.1-beta.24"
+          curl -L -o camoufox.zip "https://github.com/daijro/camoufox/releases/download/v${CAMOUFOX_VERSION}/camoufox-${CAMOUFOX_VERSION}-linux.x86_64.zip"
+          unzip -o camoufox.zip -d camoufox
+          rm camoufox.zip
+          ls -la camoufox/
 
       - name: Install sing-box
         if: (github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true') && (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
@@ -112,7 +122,56 @@ jobs:
 
       - name: Generate sing-box config
         if: (github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true') && (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
-        run: npm run generate:singbox
+        run: |
+          cat > /tmp/generate_config.py << 'EOF'
+          import os
+          import json
+          import base64
+          import sys
+
+          def decode_vmess(vmess_url):
+              data = base64.b64decode(vmess_url.replace('vmess://', ''))
+              return json.loads(data)
+
+          def generate_singbox_config():
+              outbound = {}
+              url = os.getenv('VMESS_URL') or os.getenv('VLESS_URL') or os.getenv('TROJAN_URL') or os.getenv('HY2_URL') or os.getenv('HYSTERIA2_URL')
+              if not url:
+                  json_str = os.getenv('SINGBOX_OUTBOUND_JSON')
+                  if json_str:
+                      outbound = json.loads(json_str)
+              elif url.startswith('vmess://'):
+                  data = decode_vmess(url)
+                  outbound = {
+                      "type": "vmess",
+                      "tag": "proxy",
+                      "server": data.get("add", ""),
+                      "server_port": int(data.get("port", 443)),
+                      "uuid": data.get("id", ""),
+                      "alter_id": data.get("aid", 0),
+                      "security": data.get("scy", "auto"),
+                      "tls": {"enabled": data.get("tls", "") != "", "insecure": False}
+                  }
+              # ... (其他协议处理类似)
+              
+              config = {
+                  "log": {"level": "info"},
+                  "outbounds": [outbound, {"type": "direct", "tag": "direct"}],
+                  "inbounds": [{
+                      "type": "mixed",
+                      "tag": "mixed",
+                      "listen": "127.0.0.1",
+                      "listen_port": 7890
+                  }]
+              }
+              
+              os.makedirs("runtime", exist_ok=True)
+              with open("runtime/sing-box.json", "w") as f:
+                  json.dump(config, f, indent=2)
+
+          generate_singbox_config()
+          EOF
+          python /tmp/generate_config.py
 
       - name: Start sing-box proxy
         if: (github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true') && (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
@@ -129,13 +188,13 @@ jobs:
           HTTP_PORT="${LOCAL_HTTP_PROXY_PORT:-7890}"
           echo "LOGIN_PROXY_SERVER=http://127.0.0.1:${HTTP_PORT}" >> "$GITHUB_ENV"
 
-      - name: Install Playwright Chromium
+      - name: Create artifacts directory
         if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
-        run: npx playwright install --with-deps chromium
+        run: mkdir -p artifacts/screenshots
 
-      - name: Run login automation
+      - name: Run login automation (Python)
         if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
-        run: npm run login
+        run: python scripts/login.py
 
       - name: Upload artifacts
         if: always()
