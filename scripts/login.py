@@ -151,12 +151,25 @@ def login():
 
         print("[登录] 点击登录按钮...")
         try:
-            page.click('button[type="submit"]', timeout=5000)
+            submit_btn = page.query_selector('button[type="submit"]')
+            if submit_btn:
+                submit_btn.click(timeout=5000)
         except Exception as e:
-            print(f"[登录] 点击按钮失败: {e}")
+            print(f"[登录] 点击按钮超时（可能页面已在跳转）: {e}")
 
         print("[登录] 等待页面跳转...")
-        time.sleep(8)
+        time.sleep(10)
+
+        continue_btn = page.query_selector('button:has-text("Continue"), button:has-text("Dashboard")')
+        if continue_btn:
+            print("[登录] 检测到继续按钮，点击...")
+            try:
+                continue_btn.click(timeout=3000)
+                time.sleep(5)
+            except:
+                pass
+
+        time.sleep(5)
 
         result_url = page.url
         print(f"[登录] 最终 URL: {result_url}")
@@ -168,16 +181,16 @@ def login():
         if "Internal Server Error" in page_content:
             success = False
             print("[登录] 检测到服务器错误页面")
-        elif "500" in page_title or "Error" in page_title:
+        elif "500" in page_title:
             success = False
-            print("[登录] 检测到错误页面标题")
-        elif "login" in result_url and "servers" not in result_url:
+            print("[登录] 检测到500错误页面标题")
+        elif "login" in result_url and "servers" not in result_url and "next=" not in result_url:
             success = False
             print("[登录] 仍在登录页面")
-        elif "error" in page_content[:2000].lower():
+        elif "error" in page_content[:2000].lower() and "Internal Server Error" in page_content:
             success = False
             print("[登录] 检测到错误内容")
-        elif "servers" in result_url:
+        elif "servers" in result_url and "Internal Server Error" not in page_content:
             if SERVER_ID and str(SERVER_ID) in result_url:
                 success = True
                 print(f"[登录] 成功到达目标服务器页面: {SERVER_ID}")
@@ -188,6 +201,14 @@ def login():
             success = True
         elif "account" in result_url:
             success = True
+        elif "next=/servers" in result_url:
+            print("[登录] 检测到重定向到服务器页面，等待重定向...")
+            time.sleep(3)
+            result_url = page.url
+            if "servers" in result_url and "Internal Server Error" not in page.content():
+                success = True
+            else:
+                success = False
         else:
             success = False
 
