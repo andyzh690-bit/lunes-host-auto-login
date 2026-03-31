@@ -166,6 +166,9 @@ jobs:
             Branch: ${{ github.ref_name }}
           debug: false
           format: html
+          file: |
+            path: artifacts/screenshots/login-result.png
+            caption: Login Result
 
       - name: Upload artifacts
         if: always()
