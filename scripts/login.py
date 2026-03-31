@@ -17,8 +17,14 @@ import random
 from playwright.sync_api import sync_playwright
 
 TARGET_URL = os.getenv("LOGIN_URL", "https://betadash.lunes.host/login")
-EMAIL = os.getenv("LOGIN_EMAIL", "boss@finte.site")
-PASSWORD = os.getenv("LOGIN_PASSWORD", "Zm123123@@@")
+EMAIL = os.getenv("LOGIN_EMAIL")
+PASSWORD = os.getenv("LOGIN_PASSWORD")
+
+if not EMAIL or not PASSWORD:
+    print("错误: 必须设置 LOGIN_EMAIL 和 LOGIN_PASSWORD 环境变量")
+    print("使用方法:")
+    print("  LOGIN_EMAIL=user@example.com LOGIN_PASSWORD=pass python scripts/login.py")
+    sys.exit(1)
 
 if sys.platform == "win32":
     default_camoufox = "camoufox.exe"
@@ -159,10 +165,23 @@ def login():
         
         screenshot_path = os.path.join(os.path.dirname(__file__), "..", "artifacts", "screenshots", "login-result.png")
         os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
-        page.screenshot(path=screenshot_path, full_page=True)
+        try:
+            page.screenshot(path=screenshot_path, full_page=True)
+            print(f"[截图] 已保存: {screenshot_path}")
+        except Exception as e:
+            print(f"[截图] 保存失败: {e}")
         
+        result_json = {
+            "success": success,
+            "url": result_url,
+            "email": EMAIL
+        }
+        with open(os.path.join(os.path.dirname(__file__), "..", "artifacts", "login-result.json"), "w") as f:
+            json.dump(result_json, f)
+        print(f"[结果] {result_json}")
+
         browser.close()
-        
+
         return 0 if success else 1
 
 if __name__ == "__main__":

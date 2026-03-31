@@ -150,6 +150,15 @@ jobs:
       - name: Run login automation (Python)
         run: python scripts/login.py
 
+      - name: Read login result
+        id: login-result
+        run: |
+          if [ -f artifacts/login-result.json ]; then
+            echo "result=$(cat artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
+          else
+            echo "result={}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Telegram Notification
         if: always()
         uses: appleboy/telegram-action@master
@@ -163,12 +172,10 @@ jobs:
             Run: <a href="${{ env.CI_RUN_URL }}">View Log</a>
             
             Account: ${{ secrets.LOGIN_EMAIL }}
-            Branch: ${{ github.ref_name }}
+            URL: <a href="${{ fromJson(steps.login-result.outputs.result).url }}">${{ fromJson(steps.login-result.outputs.result).url }}</a>
           debug: false
           format: html
-          file: |
-            path: artifacts/screenshots/login-result.png
-            caption: Login Result
+          photo: artifacts/screenshots/login-result.png
 
       - name: Upload artifacts
         if: always()
