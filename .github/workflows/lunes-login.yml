@@ -48,7 +48,7 @@ jobs:
         with:
           script: |
             const workflowId = 'lunes-login.yml';
-            const intervalDays = 13;
+            const intervalDays = 1;
             const now = Date.now();
             const response = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
