@@ -197,6 +197,18 @@ jobs:
         if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
         run: python scripts/login.py
 
+      - name: Telegram Notification
+        if: always() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
+        uses: appleboy/telegram-action@master
+        with:
+          to_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            ${{ job.status }} - Lunes Host Auto Login
+            Run: ${{ env.CI_RUN_URL }}
+            Result: ${{ job.status }}
+            Branch: ${{ github.ref_name }}
+
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
