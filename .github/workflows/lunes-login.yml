@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      TARGET_URL: ${{ secrets.TARGET_URL }}
+      SERVER_ID: ${{ secrets.SERVER_ID }}
       LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
       LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
       CAMOUFOX_PATH: ${{ secrets.CAMOUFOX_PATH }}
@@ -166,13 +166,13 @@ jobs:
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           message: |
-            🔔 <b>Lunes Host Auto Login</b>
+            🤖 <b>Lunes 自动登录</b>
             
-            Status: <b>${{ job.status }}</b>
-            Run: <a href="${{ env.CI_RUN_URL }}">View Log</a>
+            状态: ${{ job.status == 'success' && '✅ 成功' || '❌ 失败' }}
+            服务器: ${{ fromJson(steps.login-result.outputs.result).server_id || '默认' }}
+            地址: ${{ fromJson(steps.login-result.outputs.result).url }}
             
-            Account: ${{ secrets.LOGIN_EMAIL }}
-            URL: <a href="${{ fromJson(steps.login-result.outputs.result).url }}">${{ fromJson(steps.login-result.outputs.result).url }}</a>
+            <a href="${{ env.CI_RUN_URL }}">查看详细日志</a>
           debug: false
           format: html
           photo: artifacts/screenshots/login-result.png

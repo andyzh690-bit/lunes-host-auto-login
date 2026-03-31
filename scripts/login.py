@@ -16,7 +16,8 @@ import time
 import random
 from playwright.sync_api import sync_playwright
 
-TARGET_URL = os.getenv("LOGIN_URL", "https://betadash.lunes.host/login")
+TARGET_URL = os.getenv("TARGET_URL", "https://betadash.lunes.host/login")
+SERVER_ID = os.getenv("SERVER_ID", "")
 EMAIL = os.getenv("LOGIN_EMAIL")
 PASSWORD = os.getenv("LOGIN_PASSWORD")
 
@@ -24,7 +25,11 @@ if not EMAIL or not PASSWORD:
     print("错误: 必须设置 LOGIN_EMAIL 和 LOGIN_PASSWORD 环境变量")
     print("使用方法:")
     print("  LOGIN_EMAIL=user@example.com LOGIN_PASSWORD=pass python scripts/login.py")
+    print("  SERVER_ID=73546 LOGIN_EMAIL=user@example.com LOGIN_PASSWORD=pass python scripts/login.py")
     sys.exit(1)
+
+if SERVER_ID:
+    TARGET_URL = f"https://betadash.lunes.host/servers/{SERVER_ID}"
 
 if sys.platform == "win32":
     default_camoufox = "camoufox.exe"
@@ -174,7 +179,8 @@ def login():
         result_json = {
             "success": success,
             "url": result_url,
-            "email": EMAIL
+            "email": EMAIL,
+            "server_id": SERVER_ID
         }
         with open(os.path.join(os.path.dirname(__file__), "..", "artifacts", "login-result.json"), "w") as f:
             json.dump(result_json, f)
