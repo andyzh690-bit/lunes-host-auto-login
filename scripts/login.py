@@ -152,8 +152,19 @@ def login():
         result_url = page.url
         print(f"[登录] 最终 URL: {result_url}")
         
-        if "login" in result_url:
+        page_content = page.content()
+        page_title = page.title()
+        print(f"[登录] 页面标题: {page_title}")
+        
+        if "Internal Server Error" in page_content:
             success = False
+            print("[登录] 检测到服务器错误页面")
+        elif "login" in result_url:
+            success = False
+            print("[登录] 仍在登录页面")
+        elif "error" in page_title.lower() or "error" in page_content[:1000].lower():
+            success = False
+            print("[登录] 检测到错误内容")
         elif "servers" in result_url:
             success = True
         elif "dashboard" in result_url:
