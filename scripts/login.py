@@ -24,7 +24,12 @@ if sys.platform == "win32":
     default_camoufox = "camoufox.exe"
 else:
     default_camoufox = "camoufox"
-CAMOUFOX_PATH = os.getenv("CAMOUFOX_PATH", os.path.join(os.path.dirname(os.path.dirname(__file__)), "camoufox", default_camoufox))
+
+_env_camoufox = os.getenv("CAMOUFOX_PATH")
+if _env_camoufox:
+    CAMOUFOX_PATH = _env_camoufox
+else:
+    CAMOUFOX_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "camoufox", default_camoufox)
 
 def human_mouse_move(page, x, y, steps=15):
     """模拟人类鼠标移动（带随机抖动）"""
