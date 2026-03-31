@@ -102,7 +102,7 @@ jobs:
         if: github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true'
         run: |
           CAMOUFOX_VERSION="135.0.1-beta.24"
-          curl -L -o camoufox.zip "https://github.com/daijro/camoufox/releases/download/v${CAMOUFOX_VERSION}/camoufox-${CAMOUFOX_VERSION}-linux.x86_64.zip"
+          curl -L -o camoufox.zip "https://github.com/daijro/camoufox/releases/download/v${CAMOUFOX_VERSION}/camoufox-${CAMOUFOX_VERSION}-lin.x86_64.zip"
           unzip -o camoufox.zip -d camoufox
           rm camoufox.zip
           ls -la camoufox/
