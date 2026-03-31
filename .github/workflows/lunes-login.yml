@@ -152,13 +152,10 @@ jobs:
 
       - name: Telegram Notification
         if: always()
-        env:
-          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         uses: appleboy/telegram-action@master
         with:
-          to_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
           message: |
             🔔 <b>Lunes Host Auto Login</b>
             
@@ -167,7 +164,7 @@ jobs:
             
             Account: ${{ secrets.LOGIN_EMAIL }}
             Branch: ${{ github.ref_name }}
-          debug: true
+          debug: false
           format: html
 
       - name: Upload artifacts
