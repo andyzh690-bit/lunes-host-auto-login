@@ -204,10 +204,18 @@ jobs:
           to_chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            ${{ job.status }} - Lunes Host Auto Login
-            Run: ${{ env.CI_RUN_URL }}
-            Result: ${{ job.status }}
+            🔔 <b>Lunes Host Auto Login</b>
+            
+            Status: <b>${{ job.status }}</b>
+            Run: <a href="${{ env.CI_RUN_URL }}">View Log</a>
+            
+            Account: ${{ secrets.LOGIN_EMAIL }}
             Branch: ${{ github.ref_name }}
+          debug: false
+          format: html
+          file: |
+            path: artifacts/screenshots/login-result.png
+            caption: Login Result
 
       - name: Upload artifacts
         if: always()
