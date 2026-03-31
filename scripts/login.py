@@ -19,7 +19,12 @@ from playwright.sync_api import sync_playwright
 TARGET_URL = os.getenv("LOGIN_URL", "https://betadash.lunes.host/login")
 EMAIL = os.getenv("LOGIN_EMAIL", "boss@finte.site")
 PASSWORD = os.getenv("LOGIN_PASSWORD", "Zm123123@@@")
-CAMOUFOX_PATH = os.getenv("CAMOUFOX_PATH", os.path.join(os.path.dirname(__file__), "..", "camoufox", "camoufox.exe"))
+
+if sys.platform == "win32":
+    default_camoufox = "camoufox.exe"
+else:
+    default_camoufox = "camoufox"
+CAMOUFOX_PATH = os.getenv("CAMOUFOX_PATH", os.path.join(os.path.dirname(__file__), "..", "camoufox", default_camoufox))
 
 def human_mouse_move(page, x, y, steps=15):
     """模拟人类鼠标移动（带随机抖动）"""
