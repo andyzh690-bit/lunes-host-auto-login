@@ -8,169 +8,54 @@ on:
 jobs:
   login:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     env:
       SERVER_ID: ${{ secrets.SERVER_ID }}
       LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
       LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
-      CAMOUFOX_PATH: ${{ secrets.CAMOUFOX_PATH }}
-      ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
-      LOGIN_PROXY_SERVER: ${{ secrets.LOGIN_PROXY_SERVER }}
-      LOGIN_PROXY_USERNAME: ${{ secrets.LOGIN_PROXY_USERNAME }}
-      LOGIN_PROXY_PASSWORD: ${{ secrets.LOGIN_PROXY_PASSWORD }}
-      LOGIN_PROXY_BYPASS: ${{ secrets.LOGIN_PROXY_BYPASS }}
-      VMESS_URL: ${{ secrets.VMESS_URL }}
-      VLESS_URL: ${{ secrets.VLESS_URL }}
-      TROJAN_URL: ${{ secrets.TROJAN_URL }}
-      HY2_URL: ${{ secrets.HY2_URL }}
-      HYSTERIA2_URL: ${{ secrets.HYSTERIA2_URL }}
-      SINGBOX_OUTBOUND_JSON: ${{ secrets.SINGBOX_OUTBOUND_JSON }}
-      LOCAL_HTTP_PROXY_PORT: ${{ secrets.LOCAL_HTTP_PROXY_PORT }}
-      LOCAL_SOCKS_PROXY_PORT: ${{ secrets.LOCAL_SOCKS_PROXY_PORT }}
-      S5_PROXY_HOST: ${{ secrets.S5_PROXY_HOST }}
-      S5_PROXY_PORT: ${{ secrets.S5_PROXY_PORT }}
-      S5_PROXY_USERNAME: ${{ secrets.S5_PROXY_USERNAME }}
-      S5_PROXY_PASSWORD: ${{ secrets.S5_PROXY_PASSWORD }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       HEADLESS: ${{ secrets.HEADLESS }}
-      RUN_TIMEOUT_MS: ${{ secrets.RUN_TIMEOUT_MS }}
-      SUCCESS_URL_PATTERN: ${{ secrets.SUCCESS_URL_PATTERN }}
-      CI_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
-
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install Python dependencies
-
+      - name: Install dependencies
         run: |
           pip install playwright
           playwright install firefox
 
       - name: Download Camoufox browser
-
         run: |
           CAMOUFOX_VERSION="135.0.1-beta.24"
           curl -L -o camoufox.zip "https://github.com/daijro/camoufox/releases/download/v${CAMOUFOX_VERSION}/camoufox-${CAMOUFOX_VERSION}-lin.x86_64.zip"
           unzip -o camoufox.zip -d camoufox
           rm camoufox.zip
           chmod +x camoufox/camoufox
-          ls -la camoufox/
-
-      - name: Install sing-box
-        if: (github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true') && (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
-        run: |
-          set -e
-          VERSION="1.11.8"
-          ARCHIVE="sing-box-${VERSION}-linux-amd64.tar.gz"
-          URL="https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/${ARCHIVE}"
-          curl -L "$URL" -o /tmp/sing-box.tar.gz
-          mkdir -p /tmp/sing-box
-          tar -xzf /tmp/sing-box.tar.gz -C /tmp/sing-box --strip-components=1
-          sudo install /tmp/sing-box/sing-box /usr/local/bin/sing-box
-          sing-box version
-
-      - name: Generate sing-box config
-        if: (github.event_name != 'schedule' || steps.interval_gate.outputs.should_run == 'true') && (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
-        run: |
-          cat > /tmp/generate_config.py << 'EOF'
-          import os
-          import json
-          import base64
-          import sys
-
-          def decode_vmess(vmess_url):
-              data = base64.b64decode(vmess_url.replace('vmess://', ''))
-              return json.loads(data)
-
-          def generate_singbox_config():
-              outbound = {}
-              url = os.getenv('VMESS_URL') or os.getenv('VLESS_URL') or os.getenv('TROJAN_URL') or os.getenv('HY2_URL') or os.getenv('HYSTERIA2_URL')
-              if not url:
-                  json_str = os.getenv('SINGBOX_OUTBOUND_JSON')
-                  if json_str:
-                      outbound = json.loads(json_str)
-              elif url.startswith('vmess://'):
-                  data = decode_vmess(url)
-                  outbound = {
-                      "type": "vmess",
-                      "tag": "proxy",
-                      "server": data.get("add", ""),
-                      "server_port": int(data.get("port", 443)),
-                      "uuid": data.get("id", ""),
-                      "alter_id": int(data.get("aid", 0)),
-                      "security": data.get("scy", "auto"),
-                      "tls": {"enabled": data.get("tls", "") != "", "insecure": False}
-                  }
-              # ... (其他协议处理类似)
-              
-              config = {
-                  "log": {"level": "info"},
-                  "outbounds": [outbound, {"type": "direct", "tag": "direct"}],
-                  "inbounds": [{
-                      "type": "mixed",
-                      "tag": "mixed",
-                      "listen": "127.0.0.1",
-                      "listen_port": 7890
-                  }]
-              }
-              
-              os.makedirs("runtime", exist_ok=True)
-              with open("runtime/sing-box.json", "w") as f:
-                  json.dump(config, f, indent=2)
-
-          generate_singbox_config()
-          EOF
-          python /tmp/generate_config.py
-
-      - name: Start sing-box proxy
-        if: (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
-        run: |
-          set -e
-          mkdir -p artifacts
-          nohup sing-box run -c runtime/sing-box.json > artifacts/sing-box.log 2>&1 &
-          echo $! > artifacts/sing-box.pid
-          sleep 5
-          if ! ps -p "$(cat artifacts/sing-box.pid)" > /dev/null; then
-            cat artifacts/sing-box.log
-            exit 1
-          fi
-          HTTP_PORT="${LOCAL_HTTP_PROXY_PORT:-7890}"
-          echo "LOGIN_PROXY_SERVER=http://127.0.0.1:${HTTP_PORT}" >> "$GITHUB_ENV"
 
       - name: Create artifacts directory
         run: mkdir -p artifacts/screenshots
 
-      - name: Run login automation (Python)
-        run: python scripts/login.py
-
-      - name: Verify screenshot exists
+      - name: Run login automation
+        id: login
         run: |
-          if [ -f artifacts/screenshots/login-result.png ]; then
-            echo "Screenshot file exists"
-            ls -la artifacts/screenshots/login-result.png
-          else
-            echo "Screenshot file NOT found"
-            ls -la artifacts/screenshots/ || echo "Directory not found"
-          fi
+          START_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
+          echo "start_time=$START_TIME" >> "$GITHUB_OUTPUT"
+          python scripts/login.py
+          END_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
+          echo "end_time=$END_TIME" >> "$GITHUB_OUTPUT"
 
       - name: Read login result
-        id: login-result
+        id: result
         run: |
           if [ -f artifacts/login-result.json ]; then
-            RESULT=$(cat artifacts/login-result.json)
-            SUCCESS=$(echo "$RESULT" | jq -r '.success // false')
-            URL=$(echo "$RESULT" | jq -r '.url // ""')
-            SERVER_ID=$(echo "$RESULT" | jq -r '.server_id // ""')
-            echo "success=$SUCCESS" >> "$GITHUB_OUTPUT"
-            echo "url=$URL" >> "$GITHUB_OUTPUT"
-            echo "server_id=$SERVER_ID" >> "$GITHUB_OUTPUT"
+            cat artifacts/login-result.json | jq -r '"success=\(.success)|url=\(.url)|server_id=\(.server_id)"' >> "$GITHUB_OUTPUT"
           else
             echo "success=false" >> "$GITHUB_OUTPUT"
             echo "url=" >> "$GITHUB_OUTPUT"
@@ -186,9 +71,11 @@ jobs:
           message: |
             🤖 <b>Lunes 自动登录</b>
             
-            状态: ${{ steps.login-result.outputs.success == 'true' && '✅ 成功' || '❌ 失败' }}
-            服务器: ${{ steps.login-result.outputs.server_id != '' && steps.login-result.outputs.server_id || '默认' }}
-            地址: ${{ steps.login-result.outputs.url }}
+            状态: ${{ steps.result.outputs.success == 'true' && '✅ 成功' || '❌ 失败' }}
+            服务器: ${{ steps.result.outputs.server_id != '' && steps.result.outputs.server_id || '默认' }}
+            开始: ${{ steps.login.outputs.start_time }}
+            结束: ${{ steps.login.outputs.end_time }}
+            地址: ${{ steps.result.outputs.url }}
           debug: false
           format: html
           photo: artifacts/screenshots/login-result.png
@@ -200,10 +87,3 @@ jobs:
           name: lunes-login-artifacts
           path: artifacts
           if-no-files-found: warn
-
-      - name: Stop sing-box
-        if: always() && (env.VMESS_URL != '' || env.VLESS_URL != '' || env.TROJAN_URL != '' || env.HY2_URL != '' || env.HYSTERIA2_URL != '' || env.SINGBOX_OUTBOUND_JSON != '')
-        run: |
-          if [ -f artifacts/sing-box.pid ]; then
-            kill "$(cat artifacts/sing-box.pid)" || true
-          fi
