@@ -82,7 +82,13 @@ def click_turnstile(page, max_wait=15):
 
 def login():
     """执行登录"""
-    camoufox_exe = os.path.abspath(CAMOUFOX_PATH)
+    camoufox_exe = CAMOUFOX_PATH
+    if not os.path.isabs(camoufox_exe):
+        camoufox_exe = os.path.abspath(camoufox_exe)
+    
+    print(f"[调试] CAMOUFOX_PATH: {CAMOUFOX_PATH}")
+    print(f"[调试] camoufox_exe: {camoufox_exe}")
+    print(f"[调试] os.path.exists: {os.path.exists(camoufox_exe)}")
     
     if not os.path.exists(camoufox_exe):
         print(f"错误: Camoufox 浏览器未找到: {camoufox_exe}")
