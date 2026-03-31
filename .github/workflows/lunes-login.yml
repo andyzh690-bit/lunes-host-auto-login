@@ -105,6 +105,7 @@ jobs:
           curl -L -o camoufox.zip "https://github.com/daijro/camoufox/releases/download/v${CAMOUFOX_VERSION}/camoufox-${CAMOUFOX_VERSION}-lin.x86_64.zip"
           unzip -o camoufox.zip -d camoufox
           rm camoufox.zip
+          chmod +x camoufox/camoufox
           ls -la camoufox/
 
       - name: Install sing-box
