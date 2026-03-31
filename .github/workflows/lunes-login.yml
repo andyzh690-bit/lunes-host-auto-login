@@ -150,6 +150,16 @@ jobs:
       - name: Run login automation (Python)
         run: python scripts/login.py
 
+      - name: Verify screenshot exists
+        run: |
+          if [ -f artifacts/screenshots/login-result.png ]; then
+            echo "Screenshot file exists"
+            ls -la artifacts/screenshots/login-result.png
+          else
+            echo "Screenshot file NOT found"
+            ls -la artifacts/screenshots/ || echo "Directory not found"
+          fi
+
       - name: Read login result
         id: login-result
         run: |
@@ -179,8 +189,6 @@ jobs:
             状态: ${{ steps.login-result.outputs.success == 'true' && '✅ 成功' || '❌ 失败' }}
             服务器: ${{ steps.login-result.outputs.server_id != '' && steps.login-result.outputs.server_id || '默认' }}
             地址: ${{ steps.login-result.outputs.url }}
-            
-            <a href="${{ env.CI_RUN_URL }}">查看详细日志</a>
           debug: false
           format: html
           photo: artifacts/screenshots/login-result.png
