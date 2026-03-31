@@ -149,7 +149,7 @@ jobs:
                       "server": data.get("add", ""),
                       "server_port": int(data.get("port", 443)),
                       "uuid": data.get("id", ""),
-                      "alter_id": data.get("aid", 0),
+                      "alter_id": int(data.get("aid", 0)),
                       "security": data.get("scy", "auto"),
                       "tls": {"enabled": data.get("tls", "") != "", "insecure": False}
                   }
