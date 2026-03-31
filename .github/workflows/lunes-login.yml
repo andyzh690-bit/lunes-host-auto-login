@@ -154,9 +154,17 @@ jobs:
         id: login-result
         run: |
           if [ -f artifacts/login-result.json ]; then
-            echo "result=$(cat artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
+            RESULT=$(cat artifacts/login-result.json)
+            SUCCESS=$(echo "$RESULT" | jq -r '.success // false')
+            URL=$(echo "$RESULT" | jq -r '.url // ""')
+            SERVER_ID=$(echo "$RESULT" | jq -r '.server_id // ""')
+            echo "success=$SUCCESS" >> "$GITHUB_OUTPUT"
+            echo "url=$URL" >> "$GITHUB_OUTPUT"
+            echo "server_id=$SERVER_ID" >> "$GITHUB_OUTPUT"
           else
-            echo "result={}" >> "$GITHUB_OUTPUT"
+            echo "success=false" >> "$GITHUB_OUTPUT"
+            echo "url=" >> "$GITHUB_OUTPUT"
+            echo "server_id=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Telegram Notification
@@ -168,9 +176,9 @@ jobs:
           message: |
             🤖 <b>Lunes 自动登录</b>
             
-            状态: ${{ job.status == 'success' && '✅ 成功' || '❌ 失败' }}
-            服务器: ${{ fromJson(steps.login-result.outputs.result).server_id || '默认' }}
-            地址: ${{ fromJson(steps.login-result.outputs.result).url }}
+            状态: ${{ steps.login-result.outputs.success == 'true' && '✅ 成功' || '❌ 失败' }}
+            服务器: ${{ steps.login-result.outputs.server_id != '' && steps.login-result.outputs.server_id || '默认' }}
+            地址: ${{ steps.login-result.outputs.url }}
             
             <a href="${{ env.CI_RUN_URL }}">查看详细日志</a>
           debug: false

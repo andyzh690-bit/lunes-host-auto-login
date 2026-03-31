@@ -152,12 +152,20 @@ def login():
         result_url = page.url
         print(f"[登录] 最终 URL: {result_url}")
         
-        success = (
-            "dashboard" in result_url or
-            "account" in result_url or
-            "manage" in result_url or
-            result_url.endswith("/") and "login" not in result_url
-        )
+        if "login" in result_url:
+            success = False
+        elif "servers" in result_url:
+            success = True
+        elif "dashboard" in result_url:
+            success = True
+        elif "account" in result_url:
+            success = True
+        elif "manage" in result_url:
+            success = True
+        elif result_url.endswith("/") and "login" not in result_url:
+            success = True
+        else:
+            success = False
         
         if success:
             print("=" * 50)
