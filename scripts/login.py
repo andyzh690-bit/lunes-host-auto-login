@@ -130,7 +130,7 @@ def login():
         )
 
         context = browser.new_context(
-            viewport={'width': 1440, 'height': 900}
+            viewport=None
         )
 
         page = context.new_page()
