@@ -28,16 +28,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install playwright
-          playwright install firefox
-
-      - name: Download Camoufox browser
-        run: |
-          CAMOUFOX_VERSION="135.0.1-beta.24"
-          curl -L -o camoufox.zip "https://github.com/daijro/camoufox/releases/download/v${CAMOUFOX_VERSION}/camoufox-${CAMOUFOX_VERSION}-lin.x86_64.zip"
-          unzip -o camoufox.zip -d camoufox
-          rm camoufox.zip
-          chmod +x camoufox/camoufox
+          pip install "camoufox[playwright]"
+          camoufox fetch
 
       - name: Create artifacts directory
         run: mkdir -p artifacts/screenshots

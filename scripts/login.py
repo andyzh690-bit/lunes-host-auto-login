@@ -158,26 +158,20 @@ def login():
     with sync_playwright() as p:
         print(f"[浏览器] 启动 Camoufox (headless={headless})...")
 
-        browser = p.firefox.launch(
-            executable_path=camoufox_exe,
-            headless=headless
+        # 使用 Camoufox 官方自带的增强防检测机制
+        from camoufox.sync_api import Camoufox
+        
+        browser = Camoufox(
+            headless=headless,
+            enable_cache=True,
+            geoip=False
         )
-
-        context = browser.new_context(
-            no_viewport=True
-        )
-
-        # 注入过盾补丁：覆盖 MouseEvent 的 screenX 和 screenY 为动态计算值
-        context.add_init_script("""
-            Object.defineProperty(MouseEvent.prototype, 'screenX', {
-                get: function() { return this.clientX + (window.screenX || 0); }
-            });
-            Object.defineProperty(MouseEvent.prototype, 'screenY', {
-                get: function() { return this.clientY + (window.screenY || 0); }
-            });
-        """)
-
+        
+        context = browser
+        
         page = context.new_page()
+
+
 
         print(f"[浏览器] 访问: {TARGET_URL}")
         page.goto(TARGET_URL, timeout=30000)
