@@ -119,6 +119,16 @@ def click_turnstile(page, max_wait=12):
     print(f"[Turnstile] 等待验证完成 ({max_wait}秒)...")
     time.sleep(max_wait)
 
+    try:
+        # 尝试检查是否生成了 token
+        token = page.evaluate('document.querySelector("[name=cf-turnstile-response]") ? document.querySelector("[name=cf-turnstile-response]").value : ""')
+        if token:
+            print("[Turnstile] 验证通过！已成功获取 Token。")
+        else:
+            print("[Turnstile] 警告：未能获取到验证 Token，可能被盾拦截。")
+    except:
+        pass
+
     return True
 
 def login():
@@ -157,10 +167,14 @@ def login():
             no_viewport=True
         )
 
-        # 注入过盾补丁：覆盖 MouseEvent 的 screenX 和 screenY (防 CDP 检测)
+        # 注入过盾补丁：覆盖 MouseEvent 的 screenX 和 screenY 为动态计算值
         context.add_init_script("""
-            Object.defineProperty(MouseEvent.prototype, 'screenX', { value: Math.floor(Math.random() * (1200 - 800 + 1)) + 800 });
-            Object.defineProperty(MouseEvent.prototype, 'screenY', { value: Math.floor(Math.random() * (600 - 400 + 1)) + 400 });
+            Object.defineProperty(MouseEvent.prototype, 'screenX', {
+                get: function() { return this.clientX + (window.screenX || 0); }
+            });
+            Object.defineProperty(MouseEvent.prototype, 'screenY', {
+                get: function() { return this.clientY + (window.screenY || 0); }
+            });
         """)
 
         page = context.new_page()
