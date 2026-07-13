@@ -14,8 +14,26 @@ import sys
 import json
 import time
 import random
+import site
 from playwright.sync_api import sync_playwright
 
+def patch_playwright():
+    try:
+        for site_package in site.getsitepackages() + [site.getusersitepackages()]:
+            core_bundle = os.path.join(site_package, 'playwright', 'driver', 'package', 'lib', 'coreBundle.js')
+            if os.path.exists(core_bundle):
+                with open(core_bundle, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                if 'url: pageError.location.url' in content:
+                    content = content.replace('url: pageError.location.url', 'url: (pageError.location || {}).url')
+                    with open(core_bundle, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    print("[系统] 已应用 Playwright coreBundle.js 补丁以防止崩溃")
+                return
+    except Exception as e:
+        print(f"[系统] 应用补丁失败: {e}")
+
+patch_playwright()
 SERVER_ID = os.getenv("SERVER_ID", "")
 EMAIL = os.getenv("LOGIN_EMAIL")
 PASSWORD = os.getenv("LOGIN_PASSWORD")
