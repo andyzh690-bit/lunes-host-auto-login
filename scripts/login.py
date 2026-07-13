@@ -24,8 +24,8 @@ def patch_playwright():
             if os.path.exists(core_bundle):
                 with open(core_bundle, 'r', encoding='utf-8') as f:
                     content = f.read()
-                if 'url: pageError.location.url' in content:
-                    content = content.replace('url: pageError.location.url', 'url: (pageError.location || {}).url')
+                if 'pageError.location.' in content:
+                    content = content.replace('pageError.location.', '(pageError.location || {}).')
                     with open(core_bundle, 'w', encoding='utf-8') as f:
                         f.write(content)
                     print("[系统] 已应用 Playwright coreBundle.js 补丁以防止崩溃")
