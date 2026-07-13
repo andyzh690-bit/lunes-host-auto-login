@@ -16,6 +16,7 @@ import time
 import random
 import site
 import subprocess
+from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 sys.path.append(os.path.dirname(__file__))
