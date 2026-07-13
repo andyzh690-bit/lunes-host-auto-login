@@ -100,17 +100,21 @@ def click_turnstile(page, max_wait=12):
         print("[Turnstile] 未找到验证框")
         return False
 
-    center_x = turnstile_box['x'] + turnstile_box['width'] / 2
-    center_y = turnstile_box['y'] + turnstile_box['height'] / 2
+    # Turnstile 验证框通常是一个长方形，复选框在最左侧
+    # 点击左侧偏中心的位置（距离左边缘约 30-40 像素）
+    click_x = turnstile_box['x'] + 40
+    click_y = turnstile_box['y'] + turnstile_box['height'] / 2
 
-    print(f"[Turnstile] 移动鼠标到 ({center_x:.0f}, {center_y:.0f})")
-    human_mouse_move(page, center_x, center_y)
+    print(f"[Turnstile] 移动鼠标到 ({click_x:.0f}, {click_y:.0f})")
+    human_mouse_move(page, click_x, click_y)
 
     print("[Turnstile] 等待人类犹豫时间...")
     time.sleep(random.randint(300, 800) / 1000)
 
-    print("[Turnstile] 点击验证框...")
-    page.mouse.click(center_x, center_y)
+    print("[Turnstile] 模拟真实点击...")
+    page.mouse.down()
+    time.sleep(random.randint(50, 150) / 1000)
+    page.mouse.up()
 
     print(f"[Turnstile] 等待验证完成 ({max_wait}秒)...")
     time.sleep(max_wait)
