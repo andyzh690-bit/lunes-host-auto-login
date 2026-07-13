@@ -15,27 +15,38 @@ import json
 import time
 import random
 import site
+import subprocess
 from playwright.sync_api import sync_playwright
 
-def patch_playwright():
-    try:
-        for site_package in site.getsitepackages() + [site.getusersitepackages()]:
-            core_bundle = os.path.join(site_package, 'playwright', 'driver', 'package', 'lib', 'coreBundle.js')
-            if os.path.exists(core_bundle):
-                with open(core_bundle, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                if 'pageError.location' in content:
-                    content = content.replace('url: pageError.location.url', 'url: (pageError.location || {}).url || ""')
-                    content = content.replace('line: pageError.location.lineNumber', 'line: (pageError.location || {}).lineNumber || 0')
-                    content = content.replace('column: pageError.location.columnNumber', 'column: (pageError.location || {}).columnNumber || 0')
-                    with open(core_bundle, 'w', encoding='utf-8') as f:
-                        f.write(content)
-                    print("[系统] 已应用 Playwright coreBundle.js 补丁以防止崩溃")
-                return
-    except Exception as e:
-        print(f"[系统] 应用补丁失败: {e}")
+sys.path.append(os.path.dirname(__file__))
+from mouse_probe import install_mouse_probe, read_mouse_probe, probe_ok
 
-patch_playwright()
+def apply_mouse_patch() -> None:
+    """
+    启动前确保 screenX/screenY 补丁已应用。
+    失败不阻断（打印警告），但会降低过盾概率。
+    """
+    script = Path(__file__).resolve().parent / "patch_playwright_mouse.py"
+    if not script.exists():
+        print("[浏览器] 未找到 patch_playwright_mouse.py，跳过鼠标补丁")
+        return
+
+    print("[浏览器] 应用 Playwright screenX/screenY 补丁...")
+    try:
+        r = subprocess.run(
+            [sys.executable, str(script)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if r.stdout:
+            print(r.stdout.strip())
+        if r.returncode != 0:
+            print(r.stderr.strip() if r.stderr else "[浏览器] 鼠标补丁失败")
+        else:
+            print("[浏览器] 鼠标补丁完成")
+    except Exception as e:
+        print(f"[浏览器] 鼠标补丁异常: {e}")
 SERVER_ID = os.getenv("SERVER_ID", "")
 EMAIL = os.getenv("LOGIN_EMAIL")
 PASSWORD = os.getenv("LOGIN_PASSWORD")
@@ -72,26 +83,54 @@ def human_mouse_move(page, x, y, steps=15):
         time.sleep(random.randint(20, 50) / 1000)
     return x, y
 
+def get_turnstile_token(page, timeout_s=12) -> str:
+    """读取 token，空字符串表示失败。"""
+    js = r"""
+    () => {
+      const names = ['cf-turnstile-response', 'g-recaptcha-response'];
+      for (const n of names) {
+        const el = document.querySelector(`[name="${n}"]`);
+        if (el && el.value) return el.value;
+      }
+      const ta = document.querySelector('textarea[name="cf-turnstile-response"]');
+      if (ta && ta.value) return ta.value;
+      return '';
+    }
+    """
+    loop = max(1, int(timeout_s / 0.5))
+    for _ in range(loop):
+        try:
+            token = page.evaluate(js)
+            if token:
+                return token
+        except:
+            pass
+        time.sleep(0.5)
+    return ""
+
 def click_turnstile(page, max_wait=12):
     """点击 Cloudflare Turnstile 验证框"""
-    print("[Turnstile] 查找验证框...")
+    print("[Turnstile] 安装鼠标探针...")
+    install_mouse_probe(page)
 
+    print("[Turnstile] 查找验证框...")
     turnstile_box = None
     selectors = [
-        'iframe[src*="turnstile"]',
-        'iframe[class*="turnstile"]',
-        '[data-sitekey]',
-        '.cf-turnstile',
-        '[class*="turnstile"]'
+        "[data-sitekey]",
+        "iframe[src*='turnstile']",
+        "iframe[src*='challenges.cloudflare.com']",
+        ".cf-turnstile",
+        "#cf-turnstile",
     ]
 
-    for selector in selectors:
+    for sel in selectors:
         try:
-            elem = page.query_selector(selector)
-            if elem:
-                turnstile_box = elem.bounding_box()
-                if turnstile_box:
-                    print(f"[Turnstile] 找到: {selector}")
+            elem = page.locator(sel).first
+            if elem.count() > 0 and elem.is_visible():
+                box = elem.bounding_box()
+                if box and box.get("width", 0) > 5 and box.get("height", 0) > 5:
+                    turnstile_box = box
+                    print(f"[Turnstile] 找到: {sel}")
                     break
         except:
             continue
@@ -100,35 +139,36 @@ def click_turnstile(page, max_wait=12):
         print("[Turnstile] 未找到验证框")
         return False
 
-    # Turnstile 验证框通常是一个长方形，复选框在最左侧
-    # 点击左侧偏中心的位置（距离左边缘约 30-40 像素）
-    click_x = turnstile_box['x'] + 40
-    click_y = turnstile_box['y'] + turnstile_box['height'] / 2
+    click_x = turnstile_box['x'] + min(28, turnstile_box["width"] * 0.15) + random.uniform(-2, 2)
+    click_y = turnstile_box['y'] + turnstile_box['height'] / 2 + random.uniform(-2, 2)
 
     print(f"[Turnstile] 移动鼠标到 ({click_x:.0f}, {click_y:.0f})")
     human_mouse_move(page, click_x, click_y)
 
     print("[Turnstile] 等待人类犹豫时间...")
-    time.sleep(random.randint(300, 800) / 1000)
+    time.sleep(random.randint(400, 900) / 1000)
 
     print("[Turnstile] 模拟真实点击...")
     page.mouse.down()
-    time.sleep(random.randint(50, 150) / 1000)
+    time.sleep(random.randint(40, 120) / 1000)
     page.mouse.up()
+    time.sleep(random.randint(30, 90) / 1000)
+    page.mouse.click(click_x, click_y, delay=random.randint(30, 80))
+
+    sample = read_mouse_probe(page)
+    print(f"[Turnstile] mouse probe: {sample}")
+    if not probe_ok(sample):
+        print("[Turnstile] 警告：screenX/screenY 可能仍异常（补丁未生效或 Camoufox 路径不同）")
+    else:
+        print("[Turnstile] mouse probe OK（screen 坐标非 0）")
 
     print(f"[Turnstile] 等待验证完成 ({max_wait}秒)...")
-    time.sleep(max_wait)
+    token = get_turnstile_token(page, timeout_s=max_wait)
+    if not token:
+        print("[Turnstile] 警告：未能获取到验证 Token，可能被盾拦截。")
+        return False
 
-    try:
-        # 尝试检查是否生成了 token
-        token = page.evaluate('document.querySelector("[name=cf-turnstile-response]") ? document.querySelector("[name=cf-turnstile-response]").value : ""')
-        if token:
-            print("[Turnstile] 验证通过！已成功获取 Token。")
-        else:
-            print("[Turnstile] 警告：未能获取到验证 Token，可能被盾拦截。")
-    except:
-        pass
-
+    print("[Turnstile] 验证通过！已成功获取 Token。")
     return True
 
 def login():
@@ -155,6 +195,8 @@ def login():
         headless = True
         print("[浏览器] 无 DISPLAY 环境变量，自动使用无头模式")
 
+    apply_mouse_patch()
+
     with sync_playwright() as p:
         print(f"[浏览器] 启动 Camoufox (headless={headless})...")
 
@@ -171,14 +213,28 @@ def login():
         
         page = context.new_page()
 
-
-
         print(f"[浏览器] 访问: {TARGET_URL}")
         page.goto(TARGET_URL, timeout=30000)
         time.sleep(5)
 
         print("[登录] 点击 Turnstile 验证框...")
-        click_turnstile(page)
+        if not click_turnstile(page):
+            print("Turnstile 未通过（token 为空），终止登录")
+            screenshot_path = os.path.join(os.path.dirname(__file__), "..", "artifacts", "screenshots", "login-result.png")
+            os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
+            page.screenshot(path=screenshot_path, full_page=True)
+            
+            result_json = {
+                "success": False,
+                "url": page.url,
+                "email": EMAIL,
+                "server_id": SERVER_ID
+            }
+            with open(os.path.join(os.path.dirname(__file__), "..", "artifacts", "login-result.json"), "w") as f:
+                json.dump(result_json, f)
+            print(f"[结果] {result_json}")
+            browser.close()
+            return 1
 
         print("[登录] 填写表单...")
         try:

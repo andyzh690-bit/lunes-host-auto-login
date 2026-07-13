@@ -34,6 +34,9 @@ jobs:
       - name: Create artifacts directory
         run: mkdir -p artifacts/screenshots
 
+      - name: Apply screenX/screenY mouse patch
+        run: python scripts/patch_playwright_mouse.py
+
       - name: Run login automation
         id: login
         run: |
