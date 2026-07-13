@@ -157,6 +157,12 @@ def login():
             no_viewport=True
         )
 
+        # 注入过盾补丁：覆盖 MouseEvent 的 screenX 和 screenY (防 CDP 检测)
+        context.add_init_script("""
+            Object.defineProperty(MouseEvent.prototype, 'screenX', { value: Math.floor(Math.random() * (1200 - 800 + 1)) + 800 });
+            Object.defineProperty(MouseEvent.prototype, 'screenY', { value: Math.floor(Math.random() * (600 - 400 + 1)) + 400 });
+        """)
+
         page = context.new_page()
 
         print(f"[浏览器] 访问: {TARGET_URL}")
