@@ -63,16 +63,7 @@ if SERVER_ID:
 else:
     TARGET_URL = "https://betadash.lunes.host/login"
 
-if sys.platform == "win32":
-    default_camoufox = "camoufox.exe"
-else:
-    default_camoufox = "camoufox"
 
-_env_camoufox = os.getenv("CAMOUFOX_PATH")
-if _env_camoufox:
-    CAMOUFOX_PATH = _env_camoufox
-else:
-    CAMOUFOX_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "camoufox", default_camoufox)
 
 def human_mouse_move(page, x, y, steps=15):
     """模拟人类鼠标移动（带随机抖动）"""
@@ -173,21 +164,11 @@ def click_turnstile(page, max_wait=12):
 
 def login():
     """执行登录"""
-    camoufox_exe = CAMOUFOX_PATH
-    if not os.path.isabs(camoufox_exe):
-        camoufox_exe = os.path.abspath(camoufox_exe)
-
-    if not os.path.exists(camoufox_exe):
-        print(f"错误: Camoufox 浏览器未找到: {camoufox_exe}")
-        print("请先下载 Camoufox 浏览器")
-        sys.exit(1)
-
     print("=" * 50)
     print("Lunes Host 自动登录")
     print("=" * 50)
     print(f"目标: {TARGET_URL}")
     print(f"账号: {EMAIL}")
-    print(f"浏览器: {camoufox_exe}")
     print("=" * 50)
 
     headless = os.getenv("HEADLESS", "true").lower() == "true"
