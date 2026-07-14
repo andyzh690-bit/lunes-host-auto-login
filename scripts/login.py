@@ -183,13 +183,19 @@ async def login_async():
     print(f"[浏览器] 启动 Camoufox (headless={headless})...")
 
     # 使用 AsyncCamoufox 并完全使用 await
-    async with AsyncCamoufox(
-        headless=headless,
-        enable_cache=True,
-        geoip=False,
-        humanize=True,
-        window=(1280, 720)
-    ) as browser:
+    kwargs = {
+        "headless": headless,
+        "enable_cache": True,
+        "geoip": False,
+        "humanize": True,
+        "window": (1280, 720)
+    }
+    proxy_url = os.getenv("CAMOUFOX_PROXY", "")
+    if proxy_url:
+        kwargs["proxy"] = {"server": proxy_url}
+        print(f"[浏览器] 启用代理: {proxy_url}")
+
+    async with AsyncCamoufox(**kwargs) as browser:
         
         state_file = os.path.join(os.path.dirname(__file__), "..", "artifacts", "state.json")
         ctx_args = {
