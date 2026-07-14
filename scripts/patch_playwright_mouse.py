@@ -48,43 +48,44 @@ function __patchScreenXY__(e, x, y) {
 """
 
 
-def candidate_corebundles() -> List[Path]:
-    paths: List[Path] = []
+def candidate_corebundles() -> list[Path]:
+    paths: list[Path] = []
 
-    # 1) 环境变量手动指定
     env = os.environ.get("PLAYWRIGHT_COREBUNDLE") or os.environ.get("COREBUNDLE_PATH")
     if env:
         paths.append(Path(env))
 
-    # 2) 常见 site-packages 路径
+    # 已安装的 playwright 包
     try:
         import playwright
-        p = Path(playwright.__file__).resolve().parent
-        paths.extend(p.rglob("coreBundle.js"))
-        paths.extend(p.rglob("corebundle.js"))
+        root = Path(playwright.__file__).resolve().parent
+        paths += list(root.rglob("coreBundle.js"))
+        paths += list(root.rglob("corebundle.js"))
+        # 常见固定相对路径
+        paths += [
+            root / "driver" / "package" / "lib" / "coreBundle.js",
+            root / "driver" / "package" / "lib" / "server" / "coreBundle.js",
+        ]
+    except Exception as e:
+        print(f"[patch] import playwright failed: {e}")
+
+    # which python 对应的 site-packages 兜底
+    try:
+        import site
+        for sp in site.getsitepackages() + [site.getusersitepackages()]:
+            p = Path(sp)
+            paths += list(p.glob("playwright/driver/package/lib/coreBundle.js"))
+            paths += list(p.glob("playwright/**/coreBundle.js"))
     except Exception:
         pass
 
-    # 3) 当前项目 venv / 本地
-    repo = Path.cwd()
-    for pattern in (
-        "**/site-packages/playwright/**/coreBundle.js",
-        "**/site-packages/playwright/**/corebundle.js",
-        "**/playwright/**/coreBundle.js",
-    ):
-        paths.extend(repo.glob(pattern))
-
-    # 去重
-    uniq: List[Path] = []
-    seen = set()
+    uniq, seen = [], set()
     for p in paths:
         try:
             rp = p.resolve()
         except Exception:
             rp = p
-        if rp in seen:
-            continue
-        if rp.is_file():
+        if rp.exists() and rp.is_file() and rp not in seen:
             uniq.append(rp)
             seen.add(rp)
     return uniq
@@ -192,10 +193,16 @@ def patch_file(path: Path) -> bool:
 
 def main() -> int:
     files = candidate_corebundles()
+    required = os.environ.get("MOUSE_PATCH_REQUIRED", "1").strip() not in {"0", "false", "False", "no"}
+
     if not files:
-        print("[patch] ERROR: coreBundle.js not found.")
-        print("[patch] tips: first install playwright/camoufox deps, or set PLAYWRIGHT_COREBUNDLE=/abs/path/coreBundle.js")
-        return 1
+        msg = (
+            "[patch] ERROR: coreBundle.js not found.\n"
+            "[patch] tips: install playwright first, then rerun; "
+            "or set PLAYWRIGHT_COREBUNDLE=/abs/path/coreBundle.js"
+        )
+        print(msg)
+        return 1 if required else 0
 
     print("[patch] candidates:")
     for p in files:
@@ -218,8 +225,7 @@ def main() -> int:
     )
 
     print(f"[patch] done. changed={changed}")
-    # 找不到可改文件时返回 1；找到但已应用返回 0
-    return 0 if files else 1
+    return 0
 
 
 if __name__ == "__main__":
