@@ -129,16 +129,23 @@ async def click_turnstile(page, max_wait=12):
     click_y = turnstile_box['y'] + turnstile_box['height'] / 2 + random.uniform(-2, 2)
 
     print(f"[Turnstile] 移动鼠标到 ({click_x:.0f}, {click_y:.0f})")
-    await human_mouse_move(page, click_x, click_y)
+    
+    # 随机滚动一下页面，模拟人类阅读
+    await page.evaluate(f"window.scrollBy(0, {random.randint(100, 300)})")
+    await asyncio.sleep(random.uniform(0.5, 1.5))
+    await page.evaluate(f"window.scrollBy(0, -{random.randint(50, 150)})")
+    await asyncio.sleep(random.uniform(0.5, 1.5))
+
+    await human_mouse_move(page, click_x, click_y, steps=25)
 
     print("[Turnstile] 等待人类犹豫时间...")
-    await asyncio.sleep(random.randint(400, 900) / 1000)
+    await asyncio.sleep(random.randint(500, 1200) / 1000)
 
     print("[Turnstile] 模拟真实点击...")
     await page.mouse.down()
-    await asyncio.sleep(random.randint(40, 120) / 1000)
+    await asyncio.sleep(random.randint(50, 150) / 1000)
     await page.mouse.up()
-    await asyncio.sleep(random.randint(30, 90) / 1000)
+    await asyncio.sleep(random.randint(40, 100) / 1000)
 
     sample = await read_mouse_probe(page)
     print(f"[Turnstile] mouse probe: {sample}")
@@ -147,6 +154,7 @@ async def click_turnstile(page, max_wait=12):
     else:
         print("[Turnstile] mouse probe OK（screen 坐标非 0）")
 
+    max_wait = 30
     print(f"[Turnstile] 等待验证完成 ({max_wait}秒)...")
     token = await get_turnstile_token(page, timeout_s=max_wait)
     if not token:
