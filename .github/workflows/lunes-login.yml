@@ -73,10 +73,12 @@ jobs:
         id: login
         env:
           MOUSE_PATCH_REQUIRED: "0"
+          HEADLESS: "false"
         run: |
+          sudo apt-get update && sudo apt-get install -y xvfb
           START_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
           echo "start_time=$START_TIME" >> "$GITHUB_OUTPUT"
-          python scripts/login.py
+          xvfb-run -a python scripts/login.py
           END_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
           echo "end_time=$END_TIME" >> "$GITHUB_OUTPUT"
 
