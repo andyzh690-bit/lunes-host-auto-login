@@ -189,7 +189,7 @@ def login():
             headless=headless,
             enable_cache=True,
             geoip=False
-        )
+        ).__enter__()
         
         context = browser
         
