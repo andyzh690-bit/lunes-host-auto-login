@@ -1,13 +1,7 @@
+#!/usr/bin/env python3
 """
 Lunes Host 自动登录脚本
 使用 Camoufox 反检测浏览器 + 人类鼠标移动点击 Cloudflare Turnstile
-
-使用方法:
-python scripts/login.py
-
-依赖:
-pip install playwright
-playwright install firefox
 """
 import os
 import sys
@@ -15,9 +9,10 @@ import json
 import time
 import random
 import site
+import asyncio
 import subprocess
 from pathlib import Path
-from playwright.sync_api import sync_playwright
+from camoufox.async_api import AsyncCamoufox
 
 sys.path.append(os.path.dirname(__file__))
 from mouse_probe import install_mouse_probe, read_mouse_probe, probe_ok
@@ -48,6 +43,7 @@ def apply_mouse_patch() -> None:
             print("[浏览器] 鼠标补丁完成")
     except Exception as e:
         print(f"[浏览器] 鼠标补丁异常: {e}")
+
 SERVER_ID = os.getenv("SERVER_ID", "")
 EMAIL = os.getenv("LOGIN_EMAIL")
 PASSWORD = os.getenv("LOGIN_PASSWORD")
@@ -64,18 +60,16 @@ if SERVER_ID:
 else:
     TARGET_URL = "https://betadash.lunes.host/login"
 
-
-
-def human_mouse_move(page, x, y, steps=15):
+async def human_mouse_move(page, x, y, steps=15):
     """模拟人类鼠标移动（带随机抖动）"""
     for _ in range(steps):
         target_x = x + random.randint(-5, 5)
         target_y = y + random.randint(-5, 5)
-        page.mouse.move(target_x, target_y)
-        time.sleep(random.randint(20, 50) / 1000)
+        await page.mouse.move(target_x, target_y)
+        await asyncio.sleep(random.randint(20, 50) / 1000)
     return x, y
 
-def get_turnstile_token(page, timeout_s=12) -> str:
+async def get_turnstile_token(page, timeout_s=12) -> str:
     """读取 token，空字符串表示失败。"""
     js = r"""
     () => {
@@ -92,18 +86,18 @@ def get_turnstile_token(page, timeout_s=12) -> str:
     loop = max(1, int(timeout_s / 0.5))
     for _ in range(loop):
         try:
-            token = page.evaluate(js)
+            token = await page.evaluate(js)
             if token:
                 return token
         except:
             pass
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
     return ""
 
-def click_turnstile(page, max_wait=12):
+async def click_turnstile(page, max_wait=12):
     """点击 Cloudflare Turnstile 验证框"""
     print("[Turnstile] 安装鼠标探针...")
-    install_mouse_probe(page)
+    await install_mouse_probe(page)
 
     print("[Turnstile] 查找验证框...")
     turnstile_box = None
@@ -118,8 +112,8 @@ def click_turnstile(page, max_wait=12):
     for sel in selectors:
         try:
             elem = page.locator(sel).first
-            if elem.count() > 0 and elem.is_visible():
-                box = elem.bounding_box()
+            if await elem.count() > 0 and await elem.is_visible():
+                box = await elem.bounding_box()
                 if box and box.get("width", 0) > 5 and box.get("height", 0) > 5:
                     turnstile_box = box
                     print(f"[Turnstile] 找到: {sel}")
@@ -135,19 +129,19 @@ def click_turnstile(page, max_wait=12):
     click_y = turnstile_box['y'] + turnstile_box['height'] / 2 + random.uniform(-2, 2)
 
     print(f"[Turnstile] 移动鼠标到 ({click_x:.0f}, {click_y:.0f})")
-    human_mouse_move(page, click_x, click_y)
+    await human_mouse_move(page, click_x, click_y)
 
     print("[Turnstile] 等待人类犹豫时间...")
-    time.sleep(random.randint(400, 900) / 1000)
+    await asyncio.sleep(random.randint(400, 900) / 1000)
 
     print("[Turnstile] 模拟真实点击...")
-    page.mouse.down()
-    time.sleep(random.randint(40, 120) / 1000)
-    page.mouse.up()
-    time.sleep(random.randint(30, 90) / 1000)
-    page.mouse.click(click_x, click_y, delay=random.randint(30, 80))
+    await page.mouse.down()
+    await asyncio.sleep(random.randint(40, 120) / 1000)
+    await page.mouse.up()
+    await asyncio.sleep(random.randint(30, 90) / 1000)
+    await page.mouse.click(click_x, click_y, delay=random.randint(30, 80))
 
-    sample = read_mouse_probe(page)
+    sample = await read_mouse_probe(page)
     print(f"[Turnstile] mouse probe: {sample}")
     if not probe_ok(sample):
         print("[Turnstile] 警告：screenX/screenY 可能仍异常（补丁未生效或 Camoufox 路径不同）")
@@ -155,7 +149,7 @@ def click_turnstile(page, max_wait=12):
         print("[Turnstile] mouse probe OK（screen 坐标非 0）")
 
     print(f"[Turnstile] 等待验证完成 ({max_wait}秒)...")
-    token = get_turnstile_token(page, timeout_s=max_wait)
+    token = await get_turnstile_token(page, timeout_s=max_wait)
     if not token:
         print("[Turnstile] 警告：未能获取到验证 Token，可能被盾拦截。")
         return False
@@ -163,8 +157,8 @@ def click_turnstile(page, max_wait=12):
     print("[Turnstile] 验证通过！已成功获取 Token。")
     return True
 
-def login():
-    """执行登录"""
+async def login_async():
+    """执行登录主逻辑 (异步)"""
     print("=" * 50)
     print("Lunes Host 自动登录")
     print("=" * 50)
@@ -179,32 +173,27 @@ def login():
 
     apply_mouse_patch()
 
-    with sync_playwright() as p:
-        print(f"[浏览器] 启动 Camoufox (headless={headless})...")
+    print(f"[浏览器] 启动 Camoufox (headless={headless})...")
 
-        # 使用 Camoufox 官方自带的增强防检测机制
-        from camoufox.sync_api import Camoufox
+    # 使用 AsyncCamoufox 并完全使用 await
+    async with AsyncCamoufox(
+        headless=headless,
+        enable_cache=True,
+        geoip=False
+    ) as browser:
         
-        browser = Camoufox(
-            headless=headless,
-            enable_cache=True,
-            geoip=False
-        ).__enter__()
-        
-        context = browser
-        
-        page = context.new_page()
+        page = await browser.new_page()
 
         print(f"[浏览器] 访问: {TARGET_URL}")
-        page.goto(TARGET_URL, timeout=30000)
-        time.sleep(5)
+        await page.goto(TARGET_URL, timeout=30000)
+        await asyncio.sleep(5)
 
         print("[登录] 点击 Turnstile 验证框...")
-        if not click_turnstile(page):
+        if not await click_turnstile(page):
             print("Turnstile 未通过（token 为空），终止登录")
             screenshot_path = os.path.join(os.path.dirname(__file__), "..", "artifacts", "screenshots", "login-result.png")
             os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
-            page.screenshot(path=screenshot_path, full_page=True)
+            await page.screenshot(path=screenshot_path, full_page=True)
             
             result_json = {
                 "success": False,
@@ -215,45 +204,45 @@ def login():
             with open(os.path.join(os.path.dirname(__file__), "..", "artifacts", "login-result.json"), "w") as f:
                 json.dump(result_json, f)
             print(f"[结果] {result_json}")
-            browser.close()
             return 1
 
         print("[登录] 填写表单...")
         try:
-            page.fill('input[name="email"], input[type="email"]', EMAIL, timeout=5000)
-            page.fill('input[name="password"], input[type="password"]', PASSWORD, timeout=5000)
+            await page.fill('input[name="email"], input[type="email"]', EMAIL, timeout=5000)
+            await page.fill('input[name="password"], input[type="password"]', PASSWORD, timeout=5000)
         except Exception as e:
             print(f"[登录] 表单填写失败: {e}")
 
         print("[登录] 点击登录按钮...")
         try:
-            submit_btn = page.query_selector('button[type="submit"]')
-            if submit_btn:
-                submit_btn.click(timeout=5000)
+            submit_btn = page.locator('button[type="submit"]').first
+            if await submit_btn.count() > 0:
+                await submit_btn.click(timeout=5000)
         except Exception as e:
             print(f"[登录] 点击按钮超时（可能页面已在跳转）: {e}")
 
         print("[登录] 等待页面跳转...")
-        time.sleep(10)
+        await asyncio.sleep(10)
 
-        continue_btn = page.query_selector('button:has-text("Continue"), button:has-text("Dashboard")')
-        if continue_btn:
-            print("[登录] 检测到继续按钮，点击...")
-            try:
-                continue_btn.click(timeout=3000)
-                time.sleep(5)
-            except:
-                pass
+        continue_btn = page.locator('button:has-text("Continue"), button:has-text("Dashboard")').first
+        try:
+            if await continue_btn.count() > 0 and await continue_btn.is_visible():
+                print("[登录] 检测到继续按钮，点击...")
+                await continue_btn.click(timeout=3000)
+                await asyncio.sleep(5)
+        except:
+            pass
 
-        time.sleep(5)
+        await asyncio.sleep(5)
 
         result_url = page.url
         print(f"[登录] 最终 URL: {result_url}")
 
-        page_content = page.content()
-        page_title = page.title()
+        page_content = await page.content()
+        page_title = await page.title()
         print(f"[登录] 页面标题: {page_title}")
 
+        success = False
         if "Internal Server Error" in page_content:
             success = False
             print("[登录] 检测到服务器错误页面")
@@ -279,14 +268,12 @@ def login():
             success = True
         elif "next=/servers" in result_url:
             print("[登录] 检测到重定向到服务器页面，等待重定向...")
-            time.sleep(3)
+            await asyncio.sleep(3)
             result_url = page.url
-            if "servers" in result_url and "Internal Server Error" not in page.content():
+            if "servers" in result_url and "Internal Server Error" not in await page.content():
                 success = True
             else:
                 success = False
-        else:
-            success = False
 
         if success:
             print("=" * 50)
@@ -300,7 +287,7 @@ def login():
         screenshot_path = os.path.join(os.path.dirname(__file__), "..", "artifacts", "screenshots", "login-result.png")
         os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
         try:
-            page.screenshot(path=screenshot_path, full_page=True)
+            await page.screenshot(path=screenshot_path, full_page=True)
             print(f"[截图] 已保存: {screenshot_path}")
         except Exception as e:
             print(f"[截图] 保存失败: {e}")
@@ -315,9 +302,11 @@ def login():
             json.dump(result_json, f)
         print(f"[结果] {result_json}")
 
-        browser.close()
-
         return 0 if success else 1
+
+def login():
+    """入口包装器"""
+    return asyncio.run(login_async())
 
 if __name__ == "__main__":
     sys.exit(login())

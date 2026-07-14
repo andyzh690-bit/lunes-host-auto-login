@@ -36,18 +36,18 @@ READ_JS = r"""
 """
 
 
-def install_mouse_probe(page) -> None:
-    page.add_init_script(PROBE_JS)
+async def install_mouse_probe(page) -> None:
+    await page.add_init_script(PROBE_JS)
     # 若页面已打开，再即时安装一次
     try:
-        page.evaluate(PROBE_JS)
+        await page.evaluate(PROBE_JS)
     except Exception:
         pass
 
 
-def read_mouse_probe(page):
+async def read_mouse_probe(page):
     try:
-        return page.evaluate(READ_JS)
+        return await page.evaluate(READ_JS)
     except Exception:
         return None
 
