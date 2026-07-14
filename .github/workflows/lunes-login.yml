@@ -28,8 +28,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install "camoufox[playwright]"
+          pip install "playwright==1.48.0" "camoufox[playwright,geoip]==0.4.11"
           camoufox fetch
+
+      - name: Show browser stack versions
+        run: |
+          python -c "import playwright,camoufox; print('playwright', getattr(playwright, '__version__', 'unknown')); print('camoufox', getattr(camoufox,'__version__', 'unknown'))"
 
       - name: Create artifacts directory
         run: mkdir -p artifacts/screenshots

@@ -179,10 +179,25 @@ async def login_async():
     async with AsyncCamoufox(
         headless=headless,
         enable_cache=True,
-        geoip=False
+        geoip=False,
+        humanize=True,
+        window=(1280, 720)
     ) as browser:
         
-        page = await browser.new_page()
+        page = None
+        try:
+            if browser.contexts:
+                ctx = browser.contexts[0]
+                page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+            else:
+                ctx = await browser.new_context(
+                    viewport={"width": 1280, "height": 720},
+                )
+                page = await ctx.new_page()
+        except Exception as e:
+            print(f"[浏览器] 创建 page 失败，尝试 fallback: {e}")
+            ctx = await browser.new_context(no_viewport=True)
+            page = await ctx.new_page()
 
         print(f"[浏览器] 访问: {TARGET_URL}")
         await page.goto(TARGET_URL, timeout=30000)
