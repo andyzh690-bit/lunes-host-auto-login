@@ -139,7 +139,6 @@ async def click_turnstile(page, max_wait=12):
     await asyncio.sleep(random.randint(40, 120) / 1000)
     await page.mouse.up()
     await asyncio.sleep(random.randint(30, 90) / 1000)
-    await page.mouse.click(click_x, click_y, delay=random.randint(30, 80))
 
     sample = await read_mouse_probe(page)
     print(f"[Turnstile] mouse probe: {sample}")
@@ -184,19 +183,24 @@ async def login_async():
         window=(1280, 720)
     ) as browser:
         
+        state_file = os.path.join(os.path.dirname(__file__), "..", "artifacts", "state.json")
+        ctx_args = {
+            "viewport": {"width": 1280, "height": 720},
+        }
+        if os.path.exists(state_file):
+            print(f"[浏览器] 加载登录态: {state_file}")
+            ctx_args["storage_state"] = state_file
+
         page = None
+        ctx = None
         try:
-            if browser.contexts:
-                ctx = browser.contexts[0]
-                page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            else:
-                ctx = await browser.new_context(
-                    viewport={"width": 1280, "height": 720},
-                )
-                page = await ctx.new_page()
+            ctx = await browser.new_context(**ctx_args)
+            page = await ctx.new_page()
         except Exception as e:
             print(f"[浏览器] 创建 page 失败，尝试 fallback: {e}")
-            ctx = await browser.new_context(no_viewport=True)
+            ctx_args["no_viewport"] = True
+            ctx_args.pop("viewport", None)
+            ctx = await browser.new_context(**ctx_args)
             page = await ctx.new_page()
 
         print(f"[浏览器] 访问: {TARGET_URL}")
@@ -294,6 +298,9 @@ async def login_async():
             print("=" * 50)
             print(">> 登录成功!")
             print("=" * 50)
+            if ctx:
+                await ctx.storage_state(path=state_file)
+                print(f"[浏览器] 已保存登录态至: {state_file}")
         else:
             print("=" * 50)
             print(">> 登录失败，请检查截图")

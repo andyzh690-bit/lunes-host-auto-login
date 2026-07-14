@@ -26,6 +26,14 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Cache browser state
+        uses: actions/cache@v4
+        with:
+          path: artifacts/state.json
+          key: ${{ runner.os }}-playwright-state-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-state-
+
       - name: Install dependencies
         run: |
           pip install "playwright==1.48.0" "camoufox[playwright,geoip]==0.4.11"
