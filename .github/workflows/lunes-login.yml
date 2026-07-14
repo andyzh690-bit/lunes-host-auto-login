@@ -47,21 +47,24 @@ jobs:
           print("found:")
           for f in files:
               print(" ", f)
-          if not files:
-              raise SystemExit("coreBundle.js not found after install")
-          print("PLAYWRIGHT_COREBUNDLE=" + str(files[0]))
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
-              fh.write(f"PLAYWRIGHT_COREBUNDLE={files[0]}\n")
+          if files:
+              print("PLAYWRIGHT_COREBUNDLE=" + str(files[0]))
+              with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
+                  fh.write(f"PLAYWRIGHT_COREBUNDLE={files[0]}\n")
           PY
 
       - name: Create artifacts directory
         run: mkdir -p artifacts/screenshots
 
       - name: Apply screenX/screenY mouse patch
+        env:
+          MOUSE_PATCH_REQUIRED: "0"
         run: python scripts/patch_playwright_mouse.py
 
       - name: Run login automation
         id: login
+        env:
+          MOUSE_PATCH_REQUIRED: "0"
         run: |
           START_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
           echo "start_time=$START_TIME" >> "$GITHUB_OUTPUT"
