@@ -61,17 +61,12 @@ jobs:
                   fh.write(f"PLAYWRIGHT_COREBUNDLE={files[0]}\n")
           PY
 
-      - name: Install Xray and Setup Proxy
+      - name: Setup Proxy
         env:
-          PROXY_URL: ${{ secrets.PROXY_URL }}
+          NODE_LINK: ${{ secrets.PROXY_URL }}
         run: |
-          if [ -n "$PROXY_URL" ]; then
-            wget -q https://github.com/XTLS/Xray-core/releases/download/v1.8.23/Xray-linux-64.zip
-            unzip -q Xray-linux-64.zip -d xray-bin
-            sudo cp xray-bin/xray /usr/local/bin/
-            sudo chmod +x /usr/local/bin/xray
-            python scripts/setup_xray.py
-          fi
+          chmod +x scripts/setup_proxy.sh
+          bash scripts/setup_proxy.sh
 
       - name: Create artifacts directory
         run: mkdir -p artifacts/screenshots

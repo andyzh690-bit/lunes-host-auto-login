@@ -190,7 +190,7 @@ async def login_async():
         "humanize": True,
         "window": (1280, 720)
     }
-    proxy_url = os.getenv("CAMOUFOX_PROXY", "")
+    proxy_url = os.getenv("PROXY_SERVER", "")
     if proxy_url:
         kwargs["proxy"] = {"server": proxy_url}
         print(f"[浏览器] 启用代理: {proxy_url}")
