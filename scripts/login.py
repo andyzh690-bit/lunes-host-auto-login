@@ -60,6 +60,51 @@ if SERVER_ID:
 else:
     TARGET_URL = "https://betadash.lunes.host/login"
 
+NAVIGATION_ATTEMPTS = 3
+NAVIGATION_RETRY_SECONDS = 10
+
+async def navigate_with_retry(page, url):
+    """Open the target and retry transient upstream failures."""
+    last_error = "navigation_failed"
+    for attempt in range(1, NAVIGATION_ATTEMPTS + 1):
+        try:
+            response = await page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
+            await asyncio.sleep(5)
+
+            status = response.status if response else None
+            title = (await page.title()).lower()
+            content = (await page.content())[:5000].lower()
+            server_error = (
+                status is not None and 500 <= status < 600
+            ) or any(
+                marker in title or marker in content
+                for marker in ("bad gateway", "host error", "internal server error")
+            )
+
+            if not server_error:
+                return True, None
+
+            last_error = f"upstream_http_{status}" if status else "upstream_server_error"
+            print(
+                f"[Navigation] Target returned {last_error} "
+                f"(attempt {attempt}/{NAVIGATION_ATTEMPTS})"
+            )
+        except Exception as exc:
+            last_error = f"navigation_exception:{type(exc).__name__}"
+            print(
+                f"[Navigation] {last_error} "
+                f"(attempt {attempt}/{NAVIGATION_ATTEMPTS}): {exc}"
+            )
+
+        if attempt < NAVIGATION_ATTEMPTS:
+            await asyncio.sleep(NAVIGATION_RETRY_SECONDS * attempt)
+
+    return False, last_error
+
 async def human_mouse_move(page, x, y, steps=15):
     """模拟人类鼠标移动（带随机抖动）"""
     for _ in range(steps):
@@ -218,8 +263,24 @@ async def login_async():
             page = await ctx.new_page()
 
         print(f"[浏览器] 访问: {TARGET_URL}")
-        await page.goto(TARGET_URL, timeout=30000)
-        await asyncio.sleep(5)
+        navigation_ok, navigation_error = await navigate_with_retry(page, TARGET_URL)
+        if not navigation_ok:
+            print(f"[Navigation] Giving up: {navigation_error}")
+            screenshot_path = os.path.join(os.path.dirname(__file__), "..", "artifacts", "screenshots", "login-result.png")
+            os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
+            await page.screenshot(path=screenshot_path, full_page=True)
+
+            result_json = {
+                "success": False,
+                "url": page.url,
+                "email": EMAIL,
+                "server_id": SERVER_ID,
+                "error": navigation_error,
+            }
+            with open(os.path.join(os.path.dirname(__file__), "..", "artifacts", "login-result.json"), "w") as f:
+                json.dump(result_json, f)
+            print(f"[Result] {result_json}")
+            return 1
 
         print("[登录] 点击 Turnstile 验证框...")
         if not await click_turnstile(page):
@@ -232,7 +293,8 @@ async def login_async():
                 "success": False,
                 "url": page.url,
                 "email": EMAIL,
-                "server_id": SERVER_ID
+                "server_id": SERVER_ID,
+                "error": "turnstile_token_missing",
             }
             with open(os.path.join(os.path.dirname(__file__), "..", "artifacts", "login-result.json"), "w") as f:
                 json.dump(result_json, f)
@@ -332,7 +394,8 @@ async def login_async():
             "success": success,
             "url": result_url,
             "email": EMAIL,
-            "server_id": SERVER_ID
+            "server_id": SERVER_ID,
+            "error": None if success else "login_failed",
         }
         with open(os.path.join(os.path.dirname(__file__), "..", "artifacts", "login-result.json"), "w") as f:
             json.dump(result_json, f)

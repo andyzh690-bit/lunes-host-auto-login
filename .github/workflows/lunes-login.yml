@@ -34,14 +34,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-playwright-state-
 
+      - name: Cache pinned Camoufox browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/camoufox
+          key: ${{ runner.os }}-camoufox-135.0.1-beta.24-${{ hashFiles('scripts/install_camoufox.sh') }}
+
       - name: Install dependencies
         run: |
           pip install "playwright==1.48.0" "camoufox[playwright,geoip]==0.4.11"
-          camoufox fetch
+          bash scripts/install_camoufox.sh
 
       - name: Show browser stack versions
         run: |
           python -c "import playwright,camoufox; print('playwright', getattr(playwright, '__version__', 'unknown')); print('camoufox', getattr(camoufox,'__version__', 'unknown'))"
+          python -c "from camoufox.pkgman import installed_verstr; print('camoufox browser', installed_verstr())"
 
       - name: Locate coreBundle.js
         run: |
@@ -85,21 +92,28 @@ jobs:
           sudo apt-get update && sudo apt-get install -y xvfb
           START_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
           echo "start_time=$START_TIME" >> "$GITHUB_OUTPUT"
+          set +e
           xvfb-run -a python scripts/login.py
+          LOGIN_EXIT=$?
+          set -e
           END_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
           echo "end_time=$END_TIME" >> "$GITHUB_OUTPUT"
+          exit "$LOGIN_EXIT"
 
       - name: Read login result
+        if: always()
         id: result
         run: |
           if [ -f artifacts/login-result.json ]; then
             echo "success=$(jq -r '.success' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
             echo "url=$(jq -r '.url' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
             echo "server_id=$(jq -r '.server_id' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
+            echo "error=$(jq -r '.error // empty' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
           else
             echo "success=false" >> "$GITHUB_OUTPUT"
             echo "url=" >> "$GITHUB_OUTPUT"
             echo "server_id=" >> "$GITHUB_OUTPUT"
+            echo "error=result_missing" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Telegram Notification
@@ -116,6 +130,7 @@ jobs:
             开始: ${{ steps.login.outputs.start_time }}
             结束: ${{ steps.login.outputs.end_time }}
             地址: ${{ steps.result.outputs.url }}
+            原因: ${{ steps.result.outputs.error }}
           debug: false
           format: html
           photo: artifacts/screenshots/login-result.png
