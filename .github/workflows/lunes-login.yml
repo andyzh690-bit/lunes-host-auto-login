@@ -15,7 +15,6 @@ jobs:
       LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      HEADLESS: ${{ secrets.HEADLESS }}
 
     steps:
       - name: Checkout repository
@@ -26,47 +25,13 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Cache browser state
-        uses: actions/cache@v4
-        with:
-          path: artifacts/state.json
-          key: ${{ runner.os }}-playwright-state-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-state-
-
-      - name: Cache pinned Camoufox browser
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/camoufox
-          key: ${{ runner.os }}-camoufox-135.0.1-beta.24-${{ hashFiles('scripts/install_camoufox.sh') }}
-
       - name: Install dependencies
         run: |
-          pip install "playwright==1.48.0" "camoufox[playwright,geoip]==0.4.11"
-          bash scripts/install_camoufox.sh
+          pip install "seleniumbase==4.51.3"
 
       - name: Show browser stack versions
         run: |
-          python -c "import playwright,camoufox; print('playwright', getattr(playwright, '__version__', 'unknown')); print('camoufox', getattr(camoufox,'__version__', 'unknown'))"
-          python -c "from camoufox.pkgman import installed_verstr; print('camoufox browser', installed_verstr())"
-
-      - name: Locate coreBundle.js
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          import playwright
-          root = Path(playwright.__file__).resolve().parent
-          files = list(root.rglob("coreBundle.js")) + list(root.rglob("corebundle.js"))
-          print("playwright root:", root)
-          print("found:")
-          for f in files:
-              print(" ", f)
-          if files:
-              print("PLAYWRIGHT_COREBUNDLE=" + str(files[0]))
-              with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
-                  fh.write(f"PLAYWRIGHT_COREBUNDLE={files[0]}\n")
-          PY
+          python -c "import seleniumbase; print('seleniumbase', seleniumbase.__version__)"
 
       - name: Setup Proxy
         env:
@@ -78,22 +43,13 @@ jobs:
       - name: Create artifacts directory
         run: mkdir -p artifacts/screenshots
 
-      - name: Apply screenX/screenY mouse patch
-        env:
-          MOUSE_PATCH_REQUIRED: "0"
-        run: python scripts/patch_playwright_mouse.py
-
       - name: Run login automation
         id: login
-        env:
-          MOUSE_PATCH_REQUIRED: "0"
-          HEADLESS: "false"
         run: |
-          sudo apt-get update && sudo apt-get install -y xvfb
           START_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
           echo "start_time=$START_TIME" >> "$GITHUB_OUTPUT"
           set +e
-          xvfb-run -a python scripts/login.py
+          python scripts/login.py
           LOGIN_EXIT=$?
           set -e
           END_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
