@@ -219,11 +219,7 @@ def login(sb):
     return True, None
 
 
-def main():
-    if not EMAIL or not PASSWORD:
-        save_result(None, False, "credentials_missing")
-        return 1
-
+def run_browser(proxy_server):
     options = {
         "uc": True,
         "test": True,
@@ -232,20 +228,45 @@ def main():
         "xvfb": True,
         "xvfb_metrics": "1366,900",
     }
-    if PROXY_SERVER:
-        options["proxy"] = PROXY_SERVER
-        print(f"[Browser] Proxy enabled: {PROXY_SERVER}")
+    if proxy_server:
+        options["proxy"] = proxy_server
+        print(f"[Browser] Proxy enabled: {proxy_server}")
+    else:
+        print("[Browser] Direct connection")
 
     try:
         with SB(**options) as sb:
             success, error = login(sb)
             save_result(sb, success, error)
-            return 0 if success else 1
+            return success, error
     except Exception as exc:
         error = f"browser_exception:{type(exc).__name__}"
         print(f"[Browser] {error}: {exc}")
         save_result(None, False, error)
+        return False, error
+
+
+def main():
+    if not EMAIL or not PASSWORD:
+        save_result(None, False, "credentials_missing")
         return 1
+
+    connection_attempts = [PROXY_SERVER] if PROXY_SERVER else [""]
+    if PROXY_SERVER:
+        connection_attempts.append("")
+
+    for index, proxy_server in enumerate(connection_attempts, start=1):
+        print(
+            f"[Browser] Connection attempt {index}/{len(connection_attempts)} "
+            f"({'proxy' if proxy_server else 'direct'})"
+        )
+        success, error = run_browser(proxy_server)
+        if success:
+            return 0
+        if index < len(connection_attempts):
+            print(f"[Browser] Retrying with direct connection after: {error}")
+
+    return 1
 
 
 if __name__ == "__main__":
