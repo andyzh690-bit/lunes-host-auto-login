@@ -140,6 +140,72 @@ def wait_for_turnstile(sb, timeout: float) -> bool:
         time.sleep(min(TOKEN_POLL_SECONDS, remaining))
 
 
+def get_turnstile_click_info(sb) -> dict:
+    script = """
+        const roots = [document];
+        const elements = [...document.querySelectorAll('*')];
+        for (const element of elements) {
+          if (element.shadowRoot) roots.push(element.shadowRoot);
+        }
+
+        const candidates = [];
+        for (const root of roots) {
+          candidates.push(...root.querySelectorAll(
+            'iframe[src*="challenges.cloudflare.com"], ' +
+            'iframe[src*="turnstile"], .cf-turnstile, [data-sitekey]'
+          ));
+        }
+
+        let target = candidates.find((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.width >= 250 && rect.height >= 50;
+        });
+
+        if (!target) {
+          let node = document.querySelector('[name="cf-turnstile-response"]');
+          for (let index = 0; node && index < 6; index += 1) {
+            const rect = node.getBoundingClientRect();
+            if (rect.width >= 250 && rect.height >= 50) {
+              target = node;
+              break;
+            }
+            node = node.parentElement;
+          }
+        }
+
+        const info = {
+          patch: window.__lunesScreenXYPatchVersion || '',
+          candidates: candidates.length,
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          outerWidth: window.outerWidth,
+          outerHeight: window.outerHeight,
+        };
+        if (!target) return info;
+
+        const rect = target.getBoundingClientRect();
+        const borderX = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
+        const chromeY = Math.max(0, window.outerHeight - window.innerHeight);
+        info.rect = {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        };
+        info.x = Math.round(window.screenX + borderX + rect.left + 22);
+        info.y = Math.round(
+          window.screenY + chromeY + rect.top + rect.height / 2
+        );
+        return info;
+    """
+    try:
+        value = sb.execute_script(script)
+        return value if isinstance(value, dict) else {}
+    except Exception as exc:
+        print(f"[Turnstile] Coordinate detection failed: {exc}")
+        return {}
+
+
 def solve_turnstile(sb) -> tuple[bool, float, str]:
     """Try the screen-coordinate patched click first, with a five-second window."""
     started = time.monotonic()
@@ -150,10 +216,21 @@ def solve_turnstile(sb) -> tuple[bool, float, str]:
         "[Turnstile] Starting patched fast path "
         f"({TURNSTILE_FAST_TIMEOUT_SECONDS:g}s)"
     )
+    click_info = get_turnstile_click_info(sb)
+    print(f"[Turnstile] Screen-coordinate diagnostics: {click_info}")
     try:
-        sb.uc_gui_click_captcha()
+        if "x" in click_info and "y" in click_info:
+            sb.uc_gui_click_x_y(
+                click_info["x"], click_info["y"], timeframe=0.35
+            )
+        else:
+            sb.uc_gui_click_captcha()
     except Exception as exc:
         print(f"[Turnstile] Fast click failed: {exc}")
+        try:
+            sb.uc_gui_click_captcha()
+        except Exception as fallback_exc:
+            print(f"[Turnstile] Auto-detected click failed: {fallback_exc}")
 
     elapsed = time.monotonic() - started
     if wait_for_turnstile(sb, TURNSTILE_FAST_TIMEOUT_SECONDS - elapsed):

@@ -29,9 +29,17 @@ class FakeBrowser:
         self.solve_on_click = solve_on_click
         self.solved = False
         self.clicks = 0
+        self.explicit_clicks = []
 
-    def execute_script(self, _script):
+    def execute_script(self, script):
+        if "__lunesScreenXYPatchVersion" in script:
+            return {"patch": "1.1.0", "x": 100, "y": 200, "candidates": 1}
         return "token" if self.solved else ""
+
+    def uc_gui_click_x_y(self, x, y, timeframe=0.25):
+        self.explicit_clicks.append((x, y, timeframe))
+        if self.solve_on_click:
+            self.solved = True
 
     def uc_gui_click_captcha(self, **_kwargs):
         self.clicks += 1
@@ -55,7 +63,8 @@ class LoginTests(unittest.TestCase):
         self.assertTrue(solved)
         self.assertEqual(mode, "screenxy_fast")
         self.assertLessEqual(duration, 5)
-        self.assertEqual(browser.clicks, 1)
+        self.assertEqual(browser.clicks, 0)
+        self.assertEqual(browser.explicit_clicks, [(100, 200, 0.35)])
 
     def test_fallback_starts_after_five_second_window(self):
         browser = FakeBrowser(solve_on_click=False)
@@ -69,6 +78,11 @@ class LoginTests(unittest.TestCase):
         self.assertTrue(solved)
         self.assertEqual(mode, "fallback")
         self.assertEqual(duration, 5)
+
+    def test_coordinate_diagnostics_include_extension_marker(self):
+        info = login.get_turnstile_click_info(FakeBrowser())
+        self.assertEqual(info["patch"], "1.1.0")
+        self.assertEqual((info["x"], info["y"]), (100, 200))
 
     def test_extension_manifest_runs_in_all_frames(self):
         manifest_path = login.TURNSTILE_EXTENSION_DIR / "manifest.json"

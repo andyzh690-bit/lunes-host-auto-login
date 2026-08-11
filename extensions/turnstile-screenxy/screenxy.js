@@ -1,4 +1,5 @@
 (() => {
+  window.__lunesScreenXYPatchVersion = "1.1.0";
   const descriptorX = Object.getOwnPropertyDescriptor(
     MouseEvent.prototype,
     "clientX",
