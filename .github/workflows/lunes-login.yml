@@ -3,7 +3,12 @@ name: Lunes Host Auto Login
 on:
   workflow_dispatch:
   schedule:
-    - cron: '17 3 * * 0'
+    - cron: '0 7 * * 1'
+      timezone: 'Asia/Shanghai'
+
+concurrency:
+  group: lunes-host-auto-login
+  cancel-in-progress: false
 
 jobs:
   login:
@@ -15,6 +20,7 @@ jobs:
       LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TURNSTILE_FAST_TIMEOUT_SECONDS: '5'
 
     steps:
       - name: Checkout repository
@@ -24,28 +30,23 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
 
       - name: Install dependencies
-        run: |
-          pip install "seleniumbase==4.51.3"
+        run: pip install -r requirements.txt
 
-      - name: Show browser stack versions
-        run: |
-          python -c "import seleniumbase; print('seleniumbase', seleniumbase.__version__)"
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
 
-      - name: Setup Proxy
+      - name: Setup proxy
         env:
           NODE_LINK: ${{ secrets.PROXY_URL }}
-        run: |
-          chmod +x scripts/setup_proxy.sh
-          bash scripts/setup_proxy.sh
-
-      - name: Create artifacts directory
-        run: mkdir -p artifacts/screenshots
+        run: bash scripts/setup_proxy.sh
 
       - name: Run login automation
         id: login
         run: |
+          mkdir -p artifacts/screenshots
           START_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
           echo "start_time=$START_TIME" >> "$GITHUB_OUTPUT"
           set +e
@@ -65,31 +66,29 @@ jobs:
             echo "url=$(jq -r '.url' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
             echo "server_id=$(jq -r '.server_id' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
             echo "error=$(jq -r '.error // empty' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
+            echo "turnstile_mode=$(jq -r '.turnstile_mode // empty' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
+            echo "turnstile_seconds=$(jq -r '.turnstile_seconds // empty' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
           else
             echo "success=false" >> "$GITHUB_OUTPUT"
-            echo "url=" >> "$GITHUB_OUTPUT"
-            echo "server_id=" >> "$GITHUB_OUTPUT"
             echo "error=result_missing" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Telegram Notification
-        if: always()
+      - name: Telegram notification
+        if: ${{ always() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
         uses: appleboy/telegram-action@master
         with:
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           message: |
-            🤖 <b>Lunes 自动登录</b>
-            
-            状态: ${{ steps.result.outputs.success == 'true' && '✅ 成功' || '❌ 失败' }}
-            服务器: ${{ steps.result.outputs.server_id != '' && steps.result.outputs.server_id || '默认' }}
+            Lunes 自动登录
+            状态: ${{ steps.result.outputs.success == 'true' && '成功' || '失败' }}
+            服务器: ${{ steps.result.outputs.server_id }}
+            CF 模式: ${{ steps.result.outputs.turnstile_mode }}
+            CF 耗时: ${{ steps.result.outputs.turnstile_seconds }} 秒
             开始: ${{ steps.login.outputs.start_time }}
             结束: ${{ steps.login.outputs.end_time }}
             地址: ${{ steps.result.outputs.url }}
             原因: ${{ steps.result.outputs.error }}
-          debug: false
-          format: html
-          photo: artifacts/screenshots/login-result.png
 
       - name: Upload artifacts
         if: always()
@@ -98,3 +97,4 @@ jobs:
           name: lunes-login-artifacts
           path: artifacts
           if-no-files-found: warn
+          retention-days: 7

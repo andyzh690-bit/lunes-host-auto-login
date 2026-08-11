@@ -4,3 +4,7 @@ runtime/
 .env
 *.log
 *.pyc
+__pycache__/
+.pytest_cache/
+sing-box
+sing-box-config.json

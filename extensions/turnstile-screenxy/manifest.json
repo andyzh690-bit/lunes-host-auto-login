@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Turnstile Screen Coordinates",
+  "version": "1.0.0",
+  "description": "Normalizes MouseEvent screen coordinates in every frame.",
+  "content_scripts": [
+    {
+      "js": ["screenxy.js"],
+      "matches": ["<all_urls>"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    }
+  ]
+}

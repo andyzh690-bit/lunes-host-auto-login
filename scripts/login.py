@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Lunes Host login automation using SeleniumBase UC mode."""
+"""Lunes Host login automation using SeleniumBase UC/CDP mode."""
+
+from __future__ import annotations
 
 import json
 import os
@@ -7,13 +9,12 @@ import sys
 import time
 from pathlib import Path
 
-from seleniumbase import SB
 
-
-SERVER_ID = os.getenv("SERVER_ID", "")
-EMAIL = os.getenv("LOGIN_EMAIL", "")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+SERVER_ID = os.getenv("SERVER_ID", "").strip()
+EMAIL = os.getenv("LOGIN_EMAIL", "").strip()
 PASSWORD = os.getenv("LOGIN_PASSWORD", "")
-PROXY_SERVER = os.getenv("PROXY_SERVER", "")
+PROXY_SERVER = os.getenv("PROXY_SERVER", "").strip()
 
 LOGIN_URL = "https://betadash.lunes.host/login"
 TARGET_URL = (
@@ -22,16 +23,22 @@ TARGET_URL = (
     else LOGIN_URL
 )
 
-ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "artifacts"
+ARTIFACTS_DIR = ROOT_DIR / "artifacts"
 SCREENSHOT_PATH = ARTIFACTS_DIR / "screenshots" / "login-result.png"
 RESULT_PATH = ARTIFACTS_DIR / "login-result.json"
+TURNSTILE_EXTENSION_DIR = ROOT_DIR / "extensions" / "turnstile-screenxy"
 
 NAVIGATION_ATTEMPTS = 3
 NAVIGATION_RETRY_SECONDS = 10
-TURNSTILE_ATTEMPTS = 3
+TURNSTILE_FAST_TIMEOUT_SECONDS = float(
+    os.getenv("TURNSTILE_FAST_TIMEOUT_SECONDS", "5")
+)
+TURNSTILE_FALLBACK_ATTEMPTS = 2
+TURNSTILE_FALLBACK_TIMEOUT_SECONDS = 10
+TOKEN_POLL_SECONDS = 0.25
 
 
-def save_result(sb, success, error=None):
+def save_result(sb, success: bool, error: str | None = None, **details) -> None:
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     SCREENSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -51,12 +58,15 @@ def save_result(sb, success, error=None):
         "url": url,
         "server_id": SERVER_ID,
         "error": error,
+        **details,
     }
-    RESULT_PATH.write_text(json.dumps(result), encoding="utf-8")
+    RESULT_PATH.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(f"[Result] {result}")
 
 
-def has_upstream_error(sb):
+def has_upstream_error(sb) -> bool:
     try:
         title = (sb.get_title() or "").lower()
         source = (sb.get_page_source() or "")[:10000].lower()
@@ -74,7 +84,7 @@ def has_upstream_error(sb):
     return any(marker in title or marker in source for marker in markers)
 
 
-def navigate_with_retry(sb, url):
+def navigate_with_retry(sb, url: str) -> tuple[bool, str | None]:
     last_error = "navigation_failed"
     for attempt in range(1, NAVIGATION_ATTEMPTS + 1):
         try:
@@ -88,7 +98,7 @@ def navigate_with_retry(sb, url):
                 return True, None
             last_error = "upstream_server_error"
             print(
-                f"[Navigation] Target returned a server error "
+                "[Navigation] Target returned a server error "
                 f"(attempt {attempt}/{NAVIGATION_ATTEMPTS})"
             )
         except Exception as exc:
@@ -104,140 +114,167 @@ def navigate_with_retry(sb, url):
     return False, last_error
 
 
-def get_turnstile_token(sb):
+def get_turnstile_token(sb) -> str:
+    script = """
+        const names = ['cf-turnstile-response', 'g-recaptcha-response'];
+        for (const name of names) {
+          const element = document.querySelector(`[name="${name}"]`);
+          if (element && element.value) return element.value;
+        }
+        return '';
+    """
     try:
-        return sb.execute_script(
-            """
-            const names = ['cf-turnstile-response', 'g-recaptcha-response'];
-            for (const name of names) {
-              const element = document.querySelector(`[name="${name}"]`);
-              if (element && element.value) return element.value;
-            }
-            return '';
-            """
-        ) or ""
+        return sb.execute_script(script) or ""
     except Exception:
         return ""
 
 
-def wait_for_turnstile(sb, timeout=15):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+def wait_for_turnstile(sb, timeout: float) -> bool:
+    deadline = time.monotonic() + max(0, timeout)
+    while True:
         if get_turnstile_token(sb):
             return True
-        time.sleep(1)
-    return False
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(TOKEN_POLL_SECONDS, remaining))
 
 
-def solve_turnstile(sb):
-    if wait_for_turnstile(sb, timeout=3):
-        print("[Turnstile] Token was generated automatically")
-        return True
+def solve_turnstile(sb) -> tuple[bool, float, str]:
+    """Try the screen-coordinate patched click first, with a five-second window."""
+    started = time.monotonic()
+    if get_turnstile_token(sb):
+        return True, 0.0, "automatic"
 
-    for attempt in range(1, TURNSTILE_ATTEMPTS + 1):
-        print(f"[Turnstile] Solve attempt {attempt}/{TURNSTILE_ATTEMPTS}")
+    print(
+        "[Turnstile] Starting patched fast path "
+        f"({TURNSTILE_FAST_TIMEOUT_SECONDS:g}s)"
+    )
+    try:
+        sb.uc_gui_click_captcha()
+    except Exception as exc:
+        print(f"[Turnstile] Fast click failed: {exc}")
+
+    elapsed = time.monotonic() - started
+    if wait_for_turnstile(sb, TURNSTILE_FAST_TIMEOUT_SECONDS - elapsed):
+        duration = time.monotonic() - started
+        print(f"[Turnstile] Fast path succeeded in {duration:.2f}s")
+        return True, duration, "screenxy_fast"
+
+    for attempt in range(1, TURNSTILE_FALLBACK_ATTEMPTS + 1):
+        print(
+            "[Turnstile] Starting compatibility fallback "
+            f"{attempt}/{TURNSTILE_FALLBACK_ATTEMPTS}"
+        )
         try:
             sb.solve_captcha()
         except Exception as exc:
-            print(f"[Turnstile] CDP solver failed: {exc}")
-        if wait_for_turnstile(sb, timeout=12):
-            print("[Turnstile] Token generated")
-            return True
-
+            print(f"[Turnstile] CDP fallback failed: {exc}")
         try:
             sb.uc_gui_click_captcha(blind=True)
         except Exception as exc:
-            print(f"[Turnstile] GUI fallback failed: {exc}")
-        if wait_for_turnstile(sb, timeout=8):
-            print("[Turnstile] Token generated by GUI fallback")
-            return True
+            print(f"[Turnstile] Blind fallback failed: {exc}")
+        if wait_for_turnstile(sb, TURNSTILE_FALLBACK_TIMEOUT_SECONDS):
+            duration = time.monotonic() - started
+            print(f"[Turnstile] Fallback succeeded in {duration:.2f}s")
+            return True, duration, "fallback"
 
-    print("[Turnstile] Token not visible; continuing with form submission")
-    return False
+    duration = time.monotonic() - started
+    print(f"[Turnstile] Token missing after {duration:.2f}s")
+    return False, duration, "failed"
 
 
-def fill_login_form(sb):
+def fill_login_form(sb) -> None:
     email_selector = "input#email, input[name='email'], input[type='email']"
-    password_selector = "input#password, input[name='password'], input[type='password']"
-
+    password_selector = (
+        "input#password, input[name='password'], input[type='password']"
+    )
     sb.wait_for_element_visible(email_selector, timeout=20)
     sb.wait_for_element_visible(password_selector, timeout=20)
     sb.type(email_selector, EMAIL)
     sb.type(password_selector, PASSWORD)
-    sb.sleep(1)
 
 
-def login(sb):
+def login(sb) -> tuple[bool, str | None, dict]:
     navigation_ok, navigation_error = navigate_with_retry(sb, TARGET_URL)
     if not navigation_ok:
-        return False, navigation_error
+        return False, navigation_error, {}
 
     current_url = sb.get_current_url()
     if "/login" not in current_url and (
         not SERVER_ID or f"/servers/{SERVER_ID}" in current_url
     ):
         print("[Login] Existing session is valid")
-        return True, None
+        return True, None, {"turnstile_mode": "not_required"}
 
-    print("[Login] Filling credentials before Turnstile")
     try:
         fill_login_form(sb)
     except Exception as exc:
-        return False, f"login_form_missing:{type(exc).__name__}"
+        return False, f"login_form_missing:{type(exc).__name__}", {}
 
-    turnstile_solved = solve_turnstile(sb)
+    solved, duration, mode = solve_turnstile(sb)
+    details = {
+        "turnstile_solved": solved,
+        "turnstile_mode": mode,
+        "turnstile_seconds": round(duration, 2),
+    }
 
-    print("[Login] Submitting form")
     try:
         sb.click("button[type='submit']", timeout=10)
     except Exception as exc:
-        return False, f"submit_failed:{type(exc).__name__}"
+        return False, f"submit_failed:{type(exc).__name__}", details
 
     sb.sleep(10)
     if has_upstream_error(sb):
-        return False, "upstream_server_error"
+        return False, "upstream_server_error", details
 
     current_url = sb.get_current_url()
     if "/login" in current_url:
         error = "login_rejected"
-        if not turnstile_solved and not get_turnstile_token(sb):
+        if not solved and not get_turnstile_token(sb):
             error = "turnstile_token_missing"
-        return False, error
+        return False, error, details
 
     if SERVER_ID and f"/servers/{SERVER_ID}" not in current_url:
         navigation_ok, navigation_error = navigate_with_retry(sb, TARGET_URL)
         if not navigation_ok:
-            return False, navigation_error
+            return False, navigation_error, details
         current_url = sb.get_current_url()
 
     if SERVER_ID and f"/servers/{SERVER_ID}" not in current_url:
-        return False, "server_page_not_reached"
-
+        return False, "server_page_not_reached", details
     if has_upstream_error(sb):
-        return False, "upstream_server_error"
+        return False, "upstream_server_error", details
 
-    return True, None
+    return True, None, details
 
 
-def run_browser(proxy_server):
+def run_browser(proxy_server: str) -> tuple[bool, str | None]:
+    from seleniumbase import SB
+
+    if not TURNSTILE_EXTENSION_DIR.is_dir():
+        error = "turnstile_extension_missing"
+        save_result(None, False, error)
+        return False, error
+
     options = {
         "uc": True,
         "test": True,
-        "incognito": True,
         "locale": "en",
         "xvfb": True,
         "xvfb_metrics": "1366,900",
+        "extension_dir": str(TURNSTILE_EXTENSION_DIR),
     }
     if proxy_server:
         options["proxy"] = proxy_server
-        print(f"[Browser] Proxy enabled: {proxy_server}")
+        print("[Browser] Proxy enabled")
     else:
         print("[Browser] Direct connection")
 
     try:
         with SB(**options) as sb:
-            success, error = login(sb)
-            save_result(sb, success, error)
+            success, error, details = login(sb)
+            save_result(sb, success, error, **details)
             return success, error
     except Exception as exc:
         error = f"browser_exception:{type(exc).__name__}"
@@ -246,9 +283,12 @@ def run_browser(proxy_server):
         return False, error
 
 
-def main():
+def main() -> int:
     if not EMAIL or not PASSWORD:
         save_result(None, False, "credentials_missing")
+        return 1
+    if TURNSTILE_FAST_TIMEOUT_SECONDS <= 0:
+        save_result(None, False, "invalid_fast_timeout")
         return 1
 
     connection_attempts = [PROXY_SERVER] if PROXY_SERVER else [""]
