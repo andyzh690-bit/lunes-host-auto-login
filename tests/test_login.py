@@ -49,6 +49,12 @@ class FakeBrowser:
     def solve_captcha(self):
         self.solved = True
 
+    def sleep(self, seconds):
+        login.time.sleep(seconds)
+
+    def save_screenshot(self, _path):
+        pass
+
 
 class LoginTests(unittest.TestCase):
     def test_fast_turnstile_path(self):

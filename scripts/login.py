@@ -25,6 +25,9 @@ TARGET_URL = (
 
 ARTIFACTS_DIR = ROOT_DIR / "artifacts"
 SCREENSHOT_PATH = ARTIFACTS_DIR / "screenshots" / "login-result.png"
+FAST_CLICK_SCREENSHOT_PATH = (
+    ARTIFACTS_DIR / "screenshots" / "turnstile-fast-click.png"
+)
 RESULT_PATH = ARTIFACTS_DIR / "login-result.json"
 TURNSTILE_EXTENSION_DIR = ROOT_DIR / "extensions" / "turnstile-screenxy"
 
@@ -184,6 +187,13 @@ def get_turnstile_click_info(sb) -> dict:
           outerWidth: window.outerWidth,
           outerHeight: window.outerHeight,
         };
+        const probe = new MouseEvent('lunes-screenxy-probe', {
+          clientX: 7,
+          clientY: 9,
+        });
+        info.eventScreenX = probe.screenX;
+        info.eventScreenY = probe.screenY;
+        info.patchActive = probe.screenX > 50 && probe.screenY > 50;
         if (!target) return info;
 
         const rect = target.getBoundingClientRect();
@@ -230,6 +240,8 @@ def solve_turnstile(sb) -> tuple[bool, float, str]:
             )
         else:
             sb.uc_gui_click_captcha()
+        sb.sleep(1)
+        sb.save_screenshot(str(FAST_CLICK_SCREENSHOT_PATH))
     except Exception as exc:
         print(f"[Turnstile] Fast click failed: {exc}")
         try:
@@ -346,6 +358,10 @@ def run_browser(proxy_server: str) -> tuple[bool, str | None]:
         "xvfb": True,
         "xvfb_metrics": "1366,900",
         "extension_dir": str(TURNSTILE_EXTENSION_DIR),
+        "chromium_arg": (
+            f"disable-extensions-except={TURNSTILE_EXTENSION_DIR},"
+            f"load-extension={TURNSTILE_EXTENSION_DIR}"
+        ),
     }
     if proxy_server:
         options["proxy"] = proxy_server
