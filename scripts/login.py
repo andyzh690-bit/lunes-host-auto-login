@@ -28,6 +28,7 @@ TARGET_URL = (
 ARTIFACTS_DIR = ROOT_DIR / "artifacts"
 SCREENSHOT_DIR = ARTIFACTS_DIR / "screenshots"
 SCREENSHOT_PATH = SCREENSHOT_DIR / "login-result.png"
+SUCCESS_SCREENSHOT_PATH = SCREENSHOT_DIR / "login-success.png"
 FAST_CLICK_SCREENSHOT_PATH = SCREENSHOT_DIR / "turnstile-fast-click.png"
 RESULT_PATH = ARTIFACTS_DIR / "login-result.json"
 TURNSTILE_EXTENSION_DIR = ROOT_DIR / "extensions" / "turnstile-screenxy"
@@ -45,6 +46,14 @@ TURNSTILE_TOTAL_TIMEOUT_SECONDS = 35
 def take_screenshot(tab, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tab.get_screenshot(path=str(path.parent), name=path.name, full_page=True)
+
+
+def take_success_screenshot(tab) -> None:
+    try:
+        take_screenshot(tab, SUCCESS_SCREENSHOT_PATH)
+        print(f"[Screenshot] Login success: {SUCCESS_SCREENSHOT_PATH}")
+    except Exception as exc:
+        print(f"[Screenshot] Login success capture failed: {exc}")
 
 
 def save_result(tab, success: bool, error: str | None = None, **details) -> None:
@@ -261,6 +270,7 @@ def login(tab) -> tuple[bool, str | None, dict]:
     if "/login" not in current_url and (
         not SERVER_ID or f"/servers/{SERVER_ID}" in current_url
     ):
+        take_success_screenshot(tab)
         return True, None, {"turnstile_mode": "not_required"}
 
     try:
@@ -298,6 +308,7 @@ def login(tab) -> tuple[bool, str | None, dict]:
 
     if SERVER_ID and f"/servers/{SERVER_ID}" not in tab.url:
         return False, "server_page_not_reached", details
+    take_success_screenshot(tab)
     return True, None, details
 
 

@@ -147,6 +147,21 @@ jobs:
             -Uri "https://api.telegram.org/bot$env:TELEGRAM_BOT_TOKEN/sendMessage" `
             -Body @{ chat_id = $env:TELEGRAM_CHAT_ID; text = $message }
 
+      - name: Telegram success screenshot
+        if: ${{ always() && steps.result.outputs.success == 'true' && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
+        shell: pwsh
+        run: |
+          $screenshot = 'artifacts/screenshots/login-success.png'
+          if (-not (Test-Path $screenshot)) {
+            throw 'Login success screenshot is missing'
+          }
+          curl.exe --silent --show-error --fail `
+            -X POST "https://api.telegram.org/bot$env:TELEGRAM_BOT_TOKEN/sendPhoto" `
+            -F "chat_id=$env:TELEGRAM_CHAT_ID" `
+            -F "photo=@$screenshot" `
+            -F "caption=Lunes 登录成功，服务器: ${{ steps.result.outputs.server_id }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v6

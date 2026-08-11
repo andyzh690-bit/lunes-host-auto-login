@@ -36,4 +36,4 @@ python scripts/login.py
 Remove-Item Env:\LOGIN_EMAIL, Env:\LOGIN_PASSWORD
 ```
 
-运行证据保存在 `artifacts/login-result.json` 和 `artifacts/screenshots/login-result.png`。
+运行证据保存在 `artifacts/login-result.json` 和 `artifacts/screenshots/`。登录成功时会额外生成 `login-success.png`，上传到 Actions Artifacts 并发送至 Telegram。
