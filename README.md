@@ -1,6 +1,6 @@
 # Lunes Host Auto Login
 
-使用 SeleniumBase UC/CDP 模式自动登录 Lunes Host，并在 GitHub Actions 中定时运行。
+使用 DrissionPage CDP 模式自动登录 Lunes Host，并在 GitHub Actions 中定时运行。
 
 ## Cloudflare 验证
 
