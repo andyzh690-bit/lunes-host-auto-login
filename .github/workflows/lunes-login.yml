@@ -39,6 +39,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: Setup proxy
+        continue-on-error: true
         env:
           NODE_LINK: ${{ secrets.PROXY_URL }}
         run: bash scripts/setup_proxy.sh
