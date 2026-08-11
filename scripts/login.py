@@ -115,16 +115,19 @@ def navigate_with_retry(sb, url: str) -> tuple[bool, str | None]:
 
 
 def get_turnstile_token(sb) -> str:
-    script = """
+    expression = """(() => {
         const names = ['cf-turnstile-response', 'g-recaptcha-response'];
         for (const name of names) {
           const element = document.querySelector(`[name="${name}"]`);
           if (element && element.value) return element.value;
         }
         return '';
-    """
+    })()"""
     try:
-        return sb.execute_script(script) or ""
+        value = sb.execute_script(expression)
+        if value is None:
+            value = sb.execute_script(f"return {expression}")
+        return value or ""
     except Exception:
         return ""
 
@@ -141,7 +144,7 @@ def wait_for_turnstile(sb, timeout: float) -> bool:
 
 
 def get_turnstile_click_info(sb) -> dict:
-    script = """
+    expression = """(() => {
         const roots = [document];
         const elements = [...document.querySelectorAll('*')];
         for (const element of elements) {
@@ -197,9 +200,11 @@ def get_turnstile_click_info(sb) -> dict:
           window.screenY + chromeY + rect.top + rect.height / 2
         );
         return info;
-    """
+    })()"""
     try:
-        value = sb.execute_script(script)
+        value = sb.execute_script(expression)
+        if value is None:
+            value = sb.execute_script(f"return {expression}")
         return value if isinstance(value, dict) else {}
     except Exception as exc:
         print(f"[Turnstile] Coordinate detection failed: {exc}")
