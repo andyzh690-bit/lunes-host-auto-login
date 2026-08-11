@@ -8,6 +8,8 @@
 
 GitHub Actions 使用 `windows-latest` 和系统自带 Microsoft Edge。代理链接由 `scripts/proxy_handler.py` 转换为本地 `http://127.0.0.1:8080`，浏览器启动后会再次验证实际出口 IP。VLESS XHTTP 使用 Xray，VLESS WebSocket 及其他支持协议使用 Sing-box。
 
+代理启动和浏览器自动化在同一工作流步骤内执行，避免本地代理进程在步骤切换时失效。成功结果要求浏览器出口返回有效 IP、页面不含 Chromium 网络错误、登录表单消失、目标服务器 URL 正确且页面正文有效；仅有地址栏跳转不会判定成功。
+
 实现参考：[ObjectAscended/CDP-bug-MouseEvent-.screenX-.screenY-patcher](https://github.com/ObjectAscended/CDP-bug-MouseEvent-.screenX-.screenY-patcher)。
 
 ## GitHub Actions

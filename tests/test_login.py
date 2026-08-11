@@ -99,6 +99,19 @@ class FakeTab:
         pass
 
 
+class FakePageStateTab:
+    def __init__(self, body_text, html="", title="", url="https://example.com/"):
+        self.body_text = body_text
+        self.html = html
+        self.title = title
+        self.url = url
+
+    def ele(self, selector, timeout=None):
+        if selector == "tag:body":
+            return type("Body", (), {"text": self.body_text})()
+        return None
+
+
 class LoginTests(unittest.TestCase):
     def test_fast_turnstile_path(self):
         tab = FakeTab()
@@ -148,6 +161,20 @@ class LoginTests(unittest.TestCase):
         self.assertIn("1200", source)
         self.assertIn("400", source)
         self.assertIn("600", source)
+
+    def test_browser_proxy_error_page_is_not_authenticated(self):
+        tab = FakePageStateTab(
+            "You're not connected\nERR_PROXY_CONNECTION_FAILED",
+            url="https://betadash.lunes.host/servers/88495",
+        )
+
+        self.assertEqual(login.browser_network_error(tab), "proxy_connection_failed")
+        self.assertFalse(login.is_authenticated_target(tab))
+
+    def test_exit_ip_requires_a_valid_ip_address(self):
+        self.assertEqual(login.parse_exit_ip('{"ip":"203.0.113.8"}'), "203.0.113.8")
+        self.assertEqual(login.parse_exit_ip("2001:db8::8"), "2001:db8::8")
+        self.assertIsNone(login.parse_exit_ip("You're not connected"))
 
 
 if __name__ == "__main__":

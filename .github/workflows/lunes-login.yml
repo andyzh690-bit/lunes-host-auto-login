@@ -41,72 +41,73 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
 
-      - name: Setup proxy
-        id: proxy
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force runtime, artifacts | Out-Null
-          if (-not $env:PROXY_URL) {
-            Write-Output "[Proxy] PROXY_URL is empty; direct connection will be used"
-            "proxy_enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-            exit 0
-          }
-
-          python scripts/proxy_handler.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $engine = (Get-Content -Raw -Encoding ascii runtime/proxy-engine.txt).Trim()
-
-          if ($engine -eq 'xray') {
-            $version = '26.5.9'
-            $archive = 'runtime/xray.zip'
-            Invoke-WebRequest -Uri "https://github.com/XTLS/Xray-core/releases/download/v$version/Xray-windows-64.zip" -OutFile $archive
-            Expand-Archive -LiteralPath $archive -DestinationPath runtime/xray -Force
-            $executable = (Resolve-Path runtime/xray/xray.exe).Path
-            & $executable run -test -config runtime/proxy-config.json
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            $arguments = @('run', '-config', (Resolve-Path runtime/proxy-config.json).Path)
-          } else {
-            $version = '1.13.18'
-            $archive = 'runtime/sing-box.zip'
-            Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v$version/sing-box-$version-windows-amd64.zip" -OutFile $archive
-            Expand-Archive -LiteralPath $archive -DestinationPath runtime/sing-box -Force
-            $executable = (Get-ChildItem -Recurse runtime/sing-box -Filter sing-box.exe | Select-Object -First 1).FullName
-            & $executable check -c runtime/proxy-config.json
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            $arguments = @('run', '-c', (Resolve-Path runtime/proxy-config.json).Path)
-          }
-
-          $process = Start-Process -FilePath $executable -ArgumentList $arguments -WindowStyle Hidden -PassThru `
-            -RedirectStandardOutput runtime/proxy.stdout.log -RedirectStandardError runtime/proxy.stderr.log
-          $process.Id | Out-File -FilePath runtime/proxy.pid -Encoding ascii
-          Start-Sleep -Seconds 3
-
-          for ($attempt = 1; $attempt -le 3; $attempt++) {
-            $exitIp = curl.exe --proxy http://127.0.0.1:8080 --silent --show-error --fail --max-time 15 https://api.ipify.org
-            if ($LASTEXITCODE -eq 0 -and $exitIp) {
-              Write-Output "[Proxy] Connection succeeded; exit IP: $exitIp"
-              "PROXY_SERVER=http://127.0.0.1:8080" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-              "proxy_enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-              exit 0
-            }
-            Write-Output "[Proxy] Connection attempt $attempt/3 failed"
-            Start-Sleep -Seconds 3
-          }
-
-          Get-Content runtime/proxy.stderr.log -ErrorAction SilentlyContinue
-          throw 'Proxy exit check failed'
-
-      - name: Run login automation
+      - name: Setup proxy and run login automation
         id: login
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force artifacts/screenshots | Out-Null
+          New-Item -ItemType Directory -Force runtime, artifacts/screenshots | Out-Null
           $startTime = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss UTC')
           "start_time=$startTime" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          python scripts/login.py
-          $loginExit = $LASTEXITCODE
-          $endTime = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss UTC')
-          "end_time=$endTime" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $loginExit = 1
+          try {
+            if ($env:PROXY_URL) {
+              python scripts/proxy_handler.py
+              if ($LASTEXITCODE -ne 0) { throw 'Proxy configuration generation failed' }
+              $engine = (Get-Content -Raw -Encoding ascii runtime/proxy-engine.txt).Trim()
+
+              if ($engine -eq 'xray') {
+                $version = '26.5.9'
+                $archive = 'runtime/xray.zip'
+                Invoke-WebRequest -Uri "https://github.com/XTLS/Xray-core/releases/download/v$version/Xray-windows-64.zip" -OutFile $archive
+                Expand-Archive -LiteralPath $archive -DestinationPath runtime/xray -Force
+                $executable = (Resolve-Path runtime/xray/xray.exe).Path
+                & $executable run -test -config runtime/proxy-config.json
+                if ($LASTEXITCODE -ne 0) { throw 'Xray configuration check failed' }
+                $arguments = @('run', '-config', (Resolve-Path runtime/proxy-config.json).Path)
+              } else {
+                $version = '1.13.18'
+                $archive = 'runtime/sing-box.zip'
+                Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v$version/sing-box-$version-windows-amd64.zip" -OutFile $archive
+                Expand-Archive -LiteralPath $archive -DestinationPath runtime/sing-box -Force
+                $executable = (Get-ChildItem -Recurse runtime/sing-box -Filter sing-box.exe | Select-Object -First 1).FullName
+                & $executable check -c runtime/proxy-config.json
+                if ($LASTEXITCODE -ne 0) { throw 'Sing-box configuration check failed' }
+                $arguments = @('run', '-c', (Resolve-Path runtime/proxy-config.json).Path)
+              }
+
+              $process = Start-Process -FilePath $executable -ArgumentList $arguments -WindowStyle Hidden -PassThru `
+                -RedirectStandardOutput runtime/proxy.stdout.log -RedirectStandardError runtime/proxy.stderr.log
+              $process.Id | Out-File -FilePath runtime/proxy.pid -Encoding ascii
+              Start-Sleep -Seconds 3
+
+              $proxyReady = $false
+              for ($attempt = 1; $attempt -le 3; $attempt++) {
+                if ($process.HasExited) { throw "Proxy process exited with code $($process.ExitCode)" }
+                $exitIp = curl.exe --proxy http://127.0.0.1:8080 --silent --show-error --fail --max-time 15 https://api.ipify.org
+                if ($LASTEXITCODE -eq 0 -and $exitIp) {
+                  Write-Output "[Proxy] Connection succeeded; exit IP: $exitIp"
+                  $proxyReady = $true
+                  break
+                }
+                Write-Output "[Proxy] Connection attempt $attempt/3 failed"
+                Start-Sleep -Seconds 3
+              }
+              if (-not $proxyReady) {
+                Get-Content runtime/proxy.stderr.log -ErrorAction SilentlyContinue
+                throw 'Proxy exit check failed'
+              }
+              $env:PROXY_SERVER = 'http://127.0.0.1:8080'
+            } else {
+              Write-Output "[Proxy] PROXY_URL is empty; direct connection will be used"
+              Remove-Item Env:\PROXY_SERVER -ErrorAction SilentlyContinue
+            }
+
+            python scripts/login.py
+            $loginExit = $LASTEXITCODE
+          } finally {
+            $endTime = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss UTC')
+            "end_time=$endTime" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
           exit $loginExit
 
       - name: Read login result

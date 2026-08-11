@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import random
@@ -82,6 +83,35 @@ def save_result(tab, success: bool, error: str | None = None, **details) -> None
     print(f"[Result] {result}")
 
 
+def page_text(tab) -> str:
+    try:
+        body = tab.ele("tag:body", timeout=2)
+        return (body.text or "") if body else ""
+    except Exception:
+        return ""
+
+
+def browser_network_error(tab) -> str | None:
+    try:
+        title = (tab.title or "").lower()
+        source = (tab.html or "")[:50000].lower()
+    except Exception:
+        title = ""
+        source = ""
+    content = "\n".join((title, source, page_text(tab).lower()))
+    markers = (
+        ("err_proxy_connection_failed", "proxy_connection_failed"),
+        ("err_tunnel_connection_failed", "proxy_tunnel_failed"),
+        ("err_connection_refused", "connection_refused"),
+        ("err_name_not_resolved", "dns_failed"),
+        ("err_internet_disconnected", "internet_disconnected"),
+        ("you're not connected", "proxy_connection_failed"),
+        ("this site can't be reached", "site_unreachable"),
+        ("this site can’t be reached", "site_unreachable"),
+    )
+    return next((error for marker, error in markers if marker in content), None)
+
+
 def has_upstream_error(tab) -> bool:
     try:
         title = (tab.title or "").lower()
@@ -100,19 +130,63 @@ def has_upstream_error(tab) -> bool:
     return any(marker in title or marker in source for marker in markers)
 
 
+def parse_exit_ip(value: str) -> str | None:
+    candidate = (value or "").strip()
+    try:
+        decoded = json.loads(candidate)
+        if isinstance(decoded, dict):
+            candidate = str(decoded.get("ip", "")).strip()
+    except (json.JSONDecodeError, TypeError):
+        pass
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return None
+
+
+def is_authenticated_target(tab) -> bool:
+    if browser_network_error(tab):
+        return False
+    try:
+        current_url = tab.url or ""
+    except Exception:
+        return False
+    if "/login" in current_url.lower():
+        return False
+    if SERVER_ID and f"/servers/{SERVER_ID}" not in current_url:
+        return False
+    try:
+        if tab.ele(
+            "css:input#password, input[name='password'], input[type='password']",
+            timeout=1,
+        ):
+            return False
+    except Exception:
+        return False
+    return len(page_text(tab).strip()) >= 20
+
+
 def navigate_with_retry(tab, url: str) -> tuple[bool, str | None]:
     last_error = "navigation_failed"
     for attempt in range(1, NAVIGATION_ATTEMPTS + 1):
         try:
             tab.get(url, retry=0, timeout=30)
             time.sleep(4)
-            if not has_upstream_error(tab):
+            network_error = browser_network_error(tab)
+            if network_error:
+                last_error = f"browser_network_error:{network_error}"
+                print(
+                    f"[Navigation] {last_error} "
+                    f"(attempt {attempt}/{NAVIGATION_ATTEMPTS})"
+                )
+            elif not has_upstream_error(tab):
                 return True, None
-            last_error = "upstream_server_error"
-            print(
-                "[Navigation] Target returned a server error "
-                f"(attempt {attempt}/{NAVIGATION_ATTEMPTS})"
-            )
+            else:
+                last_error = "upstream_server_error"
+                print(
+                    "[Navigation] Target returned a server error "
+                    f"(attempt {attempt}/{NAVIGATION_ATTEMPTS})"
+                )
         except Exception as exc:
             last_error = f"navigation_exception:{type(exc).__name__}"
             print(
@@ -266,10 +340,7 @@ def login(tab) -> tuple[bool, str | None, dict]:
     if not navigation_ok:
         return False, navigation_error, {}
 
-    current_url = tab.url
-    if "/login" not in current_url and (
-        not SERVER_ID or f"/servers/{SERVER_ID}" in current_url
-    ):
+    if is_authenticated_target(tab):
         take_success_screenshot(tab)
         return True, None, {"turnstile_mode": "not_required"}
 
@@ -296,6 +367,9 @@ def login(tab) -> tuple[bool, str | None, dict]:
         return False, f"submit_failed:{type(exc).__name__}", details
 
     time.sleep(10)
+    network_error = browser_network_error(tab)
+    if network_error:
+        return False, f"browser_network_error:{network_error}", details
     if has_upstream_error(tab):
         return False, "upstream_server_error", details
     if "/login" in tab.url:
@@ -306,8 +380,8 @@ def login(tab) -> tuple[bool, str | None, dict]:
         if not navigation_ok:
             return False, navigation_error, details
 
-    if SERVER_ID and f"/servers/{SERVER_ID}" not in tab.url:
-        return False, "server_page_not_reached", details
+    if not is_authenticated_target(tab):
+        return False, "authenticated_page_not_verified", details
     take_success_screenshot(tab)
     return True, None, details
 
@@ -337,7 +411,16 @@ def run_browser(proxy_server: str) -> tuple[bool, str | None]:
         tab = browser.latest_tab
         try:
             tab.get("https://api.ipify.org/?format=json", retry=0, timeout=20)
-            print(f"[Browser] Exit check: {(tab.ele('tag:body').text or '').strip()}")
+            exit_response = page_text(tab)
+            exit_ip = parse_exit_ip(exit_response)
+            if not exit_ip:
+                network_error = browser_network_error(tab)
+                reason = network_error or "invalid_exit_response"
+                error = f"browser_proxy_check_failed:{reason}"
+                print(f"[Browser] {error}: {exit_response[:200]!r}")
+                save_result(tab, False, error)
+                return False, error
+            print(f"[Browser] Exit IP: {exit_ip}")
         except Exception as exc:
             error = f"browser_proxy_check_failed:{type(exc).__name__}"
             print(f"[Browser] {error}: {exc}")
