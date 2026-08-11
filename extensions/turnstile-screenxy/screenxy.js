@@ -1,32 +1,18 @@
 (() => {
-  window.__lunesScreenXYPatchVersion = "1.1.0";
-  const descriptorX = Object.getOwnPropertyDescriptor(
-    MouseEvent.prototype,
-    "clientX",
-  );
-  const descriptorY = Object.getOwnPropertyDescriptor(
-    MouseEvent.prototype,
-    "clientY",
-  );
-  if (!descriptorX?.get || !descriptorY?.get) return;
+  window.__lunesScreenXYPatchVersion = "1.2.0";
 
-  const random = new Uint32Array(2);
-  crypto.getRandomValues(random);
-  const offsetX = 80 + (random[0] % 161);
-  const offsetY = 80 + (random[1] % 121);
+  const randomInteger = (minimum, maximum) =>
+    Math.floor(Math.random() * (maximum - minimum + 1)) + minimum;
 
-  Object.defineProperties(MouseEvent.prototype, {
-    screenX: {
-      configurable: true,
-      get() {
-        return offsetX + descriptorX.get.call(this);
-      },
-    },
-    screenY: {
-      configurable: true,
-      get() {
-        return offsetY + descriptorY.get.call(this);
-      },
-    },
+  const screenX = randomInteger(800, 1200);
+  const screenY = randomInteger(400, 600);
+
+  Object.defineProperty(MouseEvent.prototype, "screenX", {
+    configurable: true,
+    value: screenX,
+  });
+  Object.defineProperty(MouseEvent.prototype, "screenY", {
+    configurable: true,
+    value: screenY,
   });
 })();

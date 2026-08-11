@@ -142,8 +142,10 @@ class LoginTests(unittest.TestCase):
         source = login.TURNSTILE_PATCH_PATH.read_text(encoding="utf-8")
         self.assertIn("screenX", source)
         self.assertIn("screenY", source)
-        self.assertIn("clientX", source)
-        self.assertIn("clientY", source)
+        self.assertIn("800", source)
+        self.assertIn("1200", source)
+        self.assertIn("400", source)
+        self.assertIn("600", source)
 
 
 if __name__ == "__main__":
