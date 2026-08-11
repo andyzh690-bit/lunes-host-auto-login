@@ -12,15 +12,18 @@ concurrency:
 
 jobs:
   login:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: windows-latest
+    timeout-minutes: 20
     env:
       SERVER_ID: ${{ secrets.SERVER_ID }}
       LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
       LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      PROXY_URL: ${{ secrets.PROXY_URL }}
       TURNSTILE_FAST_TIMEOUT_SECONDS: '5'
+      BROWSER_PATH: C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
+      PYTHONUTF8: '1'
 
     steps:
       - name: Checkout repository
@@ -35,70 +38,134 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Install virtual display
-        run: sudo apt-get update && sudo apt-get install -y xvfb
-
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
 
       - name: Setup proxy
-        continue-on-error: true
-        env:
-          NODE_LINK: ${{ secrets.PROXY_URL }}
-        run: bash scripts/setup_proxy.sh
+        id: proxy
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force runtime, artifacts | Out-Null
+          if (-not $env:PROXY_URL) {
+            Write-Output "[Proxy] PROXY_URL is empty; direct connection will be used"
+            "proxy_enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            exit 0
+          }
+
+          python scripts/proxy_handler.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $engine = (Get-Content -Raw -Encoding ascii runtime/proxy-engine.txt).Trim()
+
+          if ($engine -eq 'xray') {
+            $version = '26.5.9'
+            $archive = 'runtime/xray.zip'
+            Invoke-WebRequest -Uri "https://github.com/XTLS/Xray-core/releases/download/v$version/Xray-windows-64.zip" -OutFile $archive
+            Expand-Archive -LiteralPath $archive -DestinationPath runtime/xray -Force
+            $executable = (Resolve-Path runtime/xray/xray.exe).Path
+            & $executable run -test -config runtime/proxy-config.json
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $arguments = @('run', '-config', (Resolve-Path runtime/proxy-config.json).Path)
+          } else {
+            $version = '1.13.18'
+            $archive = 'runtime/sing-box.zip'
+            Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v$version/sing-box-$version-windows-amd64.zip" -OutFile $archive
+            Expand-Archive -LiteralPath $archive -DestinationPath runtime/sing-box -Force
+            $executable = (Get-ChildItem -Recurse runtime/sing-box -Filter sing-box.exe | Select-Object -First 1).FullName
+            & $executable check -c runtime/proxy-config.json
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $arguments = @('run', '-c', (Resolve-Path runtime/proxy-config.json).Path)
+          }
+
+          $process = Start-Process -FilePath $executable -ArgumentList $arguments -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput runtime/proxy.stdout.log -RedirectStandardError runtime/proxy.stderr.log
+          $process.Id | Out-File -FilePath runtime/proxy.pid -Encoding ascii
+          Start-Sleep -Seconds 3
+
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $exitIp = curl.exe --proxy http://127.0.0.1:8080 --silent --show-error --fail --max-time 15 https://api.ipify.org
+            if ($LASTEXITCODE -eq 0 -and $exitIp) {
+              Write-Output "[Proxy] Connection succeeded; exit IP: $exitIp"
+              "PROXY_SERVER=http://127.0.0.1:8080" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+              "proxy_enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+              exit 0
+            }
+            Write-Output "[Proxy] Connection attempt $attempt/3 failed"
+            Start-Sleep -Seconds 3
+          }
+
+          Get-Content runtime/proxy.stderr.log -ErrorAction SilentlyContinue
+          throw 'Proxy exit check failed'
 
       - name: Run login automation
         id: login
+        shell: pwsh
         run: |
-          mkdir -p artifacts/screenshots
-          START_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
-          echo "start_time=$START_TIME" >> "$GITHUB_OUTPUT"
-          set +e
+          New-Item -ItemType Directory -Force artifacts/screenshots | Out-Null
+          $startTime = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss UTC')
+          "start_time=$startTime" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           python scripts/login.py
-          LOGIN_EXIT=$?
-          set -e
-          END_TIME=$(date '+%Y-%m-%d %H:%M:%S UTC')
-          echo "end_time=$END_TIME" >> "$GITHUB_OUTPUT"
-          exit "$LOGIN_EXIT"
+          $loginExit = $LASTEXITCODE
+          $endTime = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss UTC')
+          "end_time=$endTime" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          exit $loginExit
 
       - name: Read login result
         if: always()
         id: result
+        shell: pwsh
         run: |
-          if [ -f artifacts/login-result.json ]; then
-            echo "success=$(jq -r '.success' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
-            echo "url=$(jq -r '.url' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
-            echo "server_id=$(jq -r '.server_id' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
-            echo "error=$(jq -r '.error // empty' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
-            echo "turnstile_mode=$(jq -r '.turnstile_mode // empty' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
-            echo "turnstile_seconds=$(jq -r '.turnstile_seconds // empty' artifacts/login-result.json)" >> "$GITHUB_OUTPUT"
-          else
-            echo "success=false" >> "$GITHUB_OUTPUT"
-            echo "error=result_missing" >> "$GITHUB_OUTPUT"
-          fi
+          if (Test-Path artifacts/login-result.json) {
+            $result = Get-Content -Raw -Encoding utf8 artifacts/login-result.json | ConvertFrom-Json
+            "success=$($result.success.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "url=$($result.url)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "server_id=$($result.server_id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "error=$($result.error)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "turnstile_mode=$($result.turnstile_mode)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "turnstile_seconds=$($result.turnstile_seconds)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } else {
+            "success=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "error=result_missing" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
 
       - name: Telegram notification
         if: ${{ always() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
-        uses: appleboy/telegram-action@master
-        with:
-          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          to: ${{ secrets.TELEGRAM_CHAT_ID }}
-          message: |
-            Lunes 自动登录
-            状态: ${{ steps.result.outputs.success == 'true' && '成功' || '失败' }}
-            服务器: ${{ steps.result.outputs.server_id }}
-            CF 模式: ${{ steps.result.outputs.turnstile_mode }}
-            CF 耗时: ${{ steps.result.outputs.turnstile_seconds }} 秒
-            开始: ${{ steps.login.outputs.start_time }}
-            结束: ${{ steps.login.outputs.end_time }}
-            地址: ${{ steps.result.outputs.url }}
-            原因: ${{ steps.result.outputs.error }}
+        shell: pwsh
+        run: |
+          $status = if ('${{ steps.result.outputs.success }}' -eq 'true') { '成功' } else { '失败' }
+          $message = @"
+          Lunes 自动登录
+          状态: $status
+          服务器: ${{ steps.result.outputs.server_id }}
+          CF 模式: ${{ steps.result.outputs.turnstile_mode }}
+          CF 耗时: ${{ steps.result.outputs.turnstile_seconds }} 秒
+          开始: ${{ steps.login.outputs.start_time }}
+          结束: ${{ steps.login.outputs.end_time }}
+          地址: ${{ steps.result.outputs.url }}
+          原因: ${{ steps.result.outputs.error }}
+          "@
+          Invoke-RestMethod -Method Post `
+            -Uri "https://api.telegram.org/bot$env:TELEGRAM_BOT_TOKEN/sendMessage" `
+            -Body @{ chat_id = $env:TELEGRAM_CHAT_ID; text = $message }
 
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: lunes-login-artifacts
-          path: artifacts
+          path: |
+            artifacts
+            runtime/*.log
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Cleanup proxy runtime
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path runtime/proxy.pid) {
+            $proxyPid = Get-Content -Raw -Encoding ascii runtime/proxy.pid
+            Stop-Process -Id $proxyPid -Force -ErrorAction SilentlyContinue
+          }
+          if (Test-Path runtime) {
+            Remove-Item -LiteralPath runtime -Recurse -Force
+          }

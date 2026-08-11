@@ -1,10 +1,12 @@
 # Lunes Host Auto Login
 
-使用 DrissionPage CDP 模式自动登录 Lunes Host，并在 GitHub Actions 中定时运行。
+使用 Microsoft Edge 与 DrissionPage CDP 模式自动登录 Lunes Host，并在 GitHub Actions 中定时运行。
 
 ## Cloudflare 验证
 
-项目内置 MV3 扩展，在所有 frame 的 `document_start` 阶段修正 CDP 鼠标事件的 `screenX/screenY` 坐标。登录脚本先执行快速点击并在 5 秒窗口内轮询 Turnstile token；未成功时再执行兼容性回退。
+项目内置 MV3 扩展，在所有 frame 的 `document_start` 阶段修正 CDP 鼠标事件的 `screenX/screenY` 坐标。脚本进入 Turnstile shadow root 与 iframe，修补 iframe 事件坐标后仅点击一次真实 checkbox；前 5 秒作为快速窗口，之后继续校验 token，避免重复点击重启验证。
+
+GitHub Actions 使用 `windows-latest` 和系统自带 Microsoft Edge。代理链接由 `scripts/proxy_handler.py` 转换为本地 `http://127.0.0.1:8080`，浏览器启动后会再次验证实际出口 IP。VLESS XHTTP 使用 Xray，VLESS WebSocket 及其他支持协议使用 Sing-box。
 
 实现参考：[ObjectAscended/CDP-bug-MouseEvent-.screenX-.screenY-patcher](https://github.com/ObjectAscended/CDP-bug-MouseEvent-.screenX-.screenY-patcher)。
 
@@ -19,7 +21,7 @@
 | `LOGIN_EMAIL` | 是 | 登录邮箱 |
 | `LOGIN_PASSWORD` | 是 | 登录密码 |
 | `SERVER_ID` | 否 | 登录后打开的服务器 ID |
-| `PROXY_URL` | 否 | Sing-box 支持的代理链接 |
+| `PROXY_URL` | 否 | HTTP、SOCKS5、VLESS、VMess、Hysteria2 或 TUIC 代理链接 |
 | `TELEGRAM_BOT_TOKEN` | 否 | Telegram 通知 token |
 | `TELEGRAM_CHAT_ID` | 否 | Telegram 通知目标 |
 

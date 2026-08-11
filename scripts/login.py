@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import sys
 import time
 from pathlib import Path
@@ -15,6 +16,7 @@ SERVER_ID = os.getenv("SERVER_ID", "").strip()
 EMAIL = os.getenv("LOGIN_EMAIL", "").strip()
 PASSWORD = os.getenv("LOGIN_PASSWORD", "")
 PROXY_SERVER = os.getenv("PROXY_SERVER", "").strip()
+BROWSER_PATH = os.getenv("BROWSER_PATH", "").strip()
 
 LOGIN_URL = "https://betadash.lunes.host/login"
 TARGET_URL = (
@@ -36,9 +38,8 @@ NAVIGATION_RETRY_SECONDS = 10
 TURNSTILE_FAST_TIMEOUT_SECONDS = float(
     os.getenv("TURNSTILE_FAST_TIMEOUT_SECONDS", "5")
 )
-TURNSTILE_FALLBACK_ATTEMPTS = 2
-TURNSTILE_FALLBACK_TIMEOUT_SECONDS = 10
 TOKEN_POLL_SECONDS = 0.25
+TURNSTILE_TOTAL_TIMEOUT_SECONDS = 35
 
 
 def take_screenshot(tab, path: Path) -> None:
@@ -118,6 +119,12 @@ def navigate_with_retry(tab, url: str) -> tuple[bool, str | None]:
 
 def get_turnstile_token(tab) -> str:
     script = """
+        try {
+          if (window.turnstile && typeof window.turnstile.getResponse === 'function') {
+            const response = window.turnstile.getResponse();
+            if (response) return response;
+          }
+        } catch (error) {}
         const names = ['cf-turnstile-response', 'g-recaptcha-response'];
         for (const name of names) {
           const element = document.querySelector(`[name="${name}"]`);
@@ -131,21 +138,7 @@ def get_turnstile_token(tab) -> str:
         return ""
 
 
-def wait_for_turnstile(tab, timeout: float) -> bool:
-    deadline = time.monotonic() + max(0, timeout)
-    while True:
-        if get_turnstile_token(tab):
-            return True
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return False
-        time.sleep(min(TOKEN_POLL_SECONDS, remaining))
-
-
 def patch_and_click_turnstile(tab) -> dict:
-    tab.run_js("try { turnstile.reset(); } catch (error) {}")
-    time.sleep(0.25)
-
     response = tab.ele("@name=cf-turnstile-response", timeout=3)
     if not response:
         raise RuntimeError("turnstile_response_missing")
@@ -181,54 +174,66 @@ def patch_and_click_turnstile(tab) -> dict:
     button = body_shadow.ele("tag:input", timeout=3)
     if not button:
         raise RuntimeError("turnstile_button_missing")
-    button.click()
+    button.click(by_js=False)
     return diagnostics if isinstance(diagnostics, dict) else {}
 
 
 def solve_turnstile(tab) -> tuple[bool, float, str]:
     started = time.monotonic()
-    if get_turnstile_token(tab):
+    if len(get_turnstile_token(tab)) > 20:
         return True, 0.0, "automatic"
 
     print(
         "[Turnstile] Starting patched fast path "
         f"({TURNSTILE_FAST_TIMEOUT_SECONDS:g}s)"
     )
-    try:
-        diagnostics = patch_and_click_turnstile(tab)
-        print(f"[Turnstile] Iframe patch diagnostics: {diagnostics}")
-        time.sleep(1)
-        take_screenshot(tab, FAST_CLICK_SCREENSHOT_PATH)
-    except Exception as exc:
-        print(f"[Turnstile] Fast click failed: {type(exc).__name__}: {exc}")
+    clicked = False
+    fast_window_reported = False
+    deadline = started + TURNSTILE_TOTAL_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        token = get_turnstile_token(tab)
+        if len(token) > 20:
+            duration = time.monotonic() - started
+            mode = (
+                "screenxy_fast"
+                if duration <= TURNSTILE_FAST_TIMEOUT_SECONDS
+                else "screenxy_wait"
+            )
+            print(f"[Turnstile] Token received in {duration:.2f}s")
+            return True, duration, mode
 
-    elapsed = time.monotonic() - started
-    if wait_for_turnstile(tab, TURNSTILE_FAST_TIMEOUT_SECONDS - elapsed):
-        duration = time.monotonic() - started
-        print(f"[Turnstile] Fast path succeeded in {duration:.2f}s")
-        return True, duration, "screenxy_fast"
+        elapsed = time.monotonic() - started
+        if elapsed >= TURNSTILE_FAST_TIMEOUT_SECONDS and not fast_window_reported:
+            print("[Turnstile] Five-second window elapsed; continuing token polling")
+            fast_window_reported = True
 
-    for attempt in range(1, TURNSTILE_FALLBACK_ATTEMPTS + 1):
-        print(
-            "[Turnstile] Starting patched fallback "
-            f"{attempt}/{TURNSTILE_FALLBACK_ATTEMPTS}"
-        )
+        if clicked:
+            time.sleep(TOKEN_POLL_SECONDS)
+            continue
+
         try:
             diagnostics = patch_and_click_turnstile(tab)
-            print(f"[Turnstile] Fallback diagnostics: {diagnostics}")
+            print(f"[Turnstile] Iframe patch diagnostics: {diagnostics}")
+            clicked = True
+            time.sleep(1)
+            take_screenshot(tab, FAST_CLICK_SCREENSHOT_PATH)
         except Exception as exc:
             print(
-                f"[Turnstile] Fallback click failed: "
+                f"[Turnstile] Widget context unavailable; retrying: "
                 f"{type(exc).__name__}: {exc}"
             )
-        if wait_for_turnstile(tab, TURNSTILE_FALLBACK_TIMEOUT_SECONDS):
-            duration = time.monotonic() - started
-            print(f"[Turnstile] Fallback succeeded in {duration:.2f}s")
-            return True, duration, "fallback"
+            time.sleep(TOKEN_POLL_SECONDS)
 
     duration = time.monotonic() - started
     print(f"[Turnstile] Token missing after {duration:.2f}s")
     return False, duration, "failed"
+
+
+def human_type(element, value: str) -> None:
+    element.clear()
+    for character in value:
+        element.input(character, clear=False)
+        time.sleep(random.uniform(0.04, 0.12))
 
 
 def fill_login_form(tab) -> None:
@@ -241,8 +246,10 @@ def fill_login_form(tab) -> None:
     )
     if not email or not password:
         raise RuntimeError("login_form_missing")
-    email.input(EMAIL, clear=True)
-    password.input(PASSWORD, clear=True)
+    human_type(email, EMAIL)
+    time.sleep(random.uniform(0.3, 0.7))
+    human_type(password, PASSWORD)
+    time.sleep(random.uniform(0.6, 1.2))
 
 
 def login(tab) -> tuple[bool, str | None, dict]:
@@ -304,11 +311,11 @@ def run_browser(proxy_server: str) -> tuple[bool, str | None]:
 
     options = ChromiumOptions(read_file=False).auto_port()
     options.add_extension(str(TURNSTILE_EXTENSION_DIR))
-    options.set_argument("--no-sandbox")
-    options.set_argument("--disable-dev-shm-usage")
-    options.set_argument("--window-size=1366,900")
+    options.set_argument("--window-size=1440,900")
+    if BROWSER_PATH:
+        options.set_browser_path(BROWSER_PATH)
     if proxy_server:
-        options.set_argument(f"--proxy-server={proxy_server}")
+        options.set_proxy(proxy_server)
         print("[Browser] Proxy enabled")
     else:
         print("[Browser] Direct connection")
@@ -317,6 +324,14 @@ def run_browser(proxy_server: str) -> tuple[bool, str | None]:
     try:
         browser = Chromium(options)
         tab = browser.latest_tab
+        try:
+            tab.get("https://api.ipify.org/?format=json", retry=0, timeout=20)
+            print(f"[Browser] Exit check: {(tab.ele('tag:body').text or '').strip()}")
+        except Exception as exc:
+            error = f"browser_proxy_check_failed:{type(exc).__name__}"
+            print(f"[Browser] {error}: {exc}")
+            save_result(tab, False, error)
+            return False, error
         success, error, details = login(tab)
         save_result(tab, success, error, **details)
         return success, error
@@ -334,21 +349,10 @@ def run_browser(proxy_server: str) -> tuple[bool, str | None]:
 
 
 def run_attempts() -> int:
-    connection_attempts = [PROXY_SERVER] if PROXY_SERVER else [""]
-    if PROXY_SERVER:
-        connection_attempts.append("")
-
-    for index, proxy_server in enumerate(connection_attempts, start=1):
-        print(
-            f"[Browser] Connection attempt {index}/{len(connection_attempts)} "
-            f"({'proxy' if proxy_server else 'direct'})"
-        )
-        success, error = run_browser(proxy_server)
-        if success:
-            return 0
-        if index < len(connection_attempts):
-            print(f"[Browser] Retrying with direct connection after: {error}")
-    return 1
+    mode = "proxy" if PROXY_SERVER else "direct"
+    print(f"[Browser] Connection mode: {mode}")
+    success, _ = run_browser(PROXY_SERVER)
+    return 0 if success else 1
 
 
 def main() -> int:
@@ -359,17 +363,7 @@ def main() -> int:
         save_result(None, False, "invalid_fast_timeout")
         return 1
 
-    display = None
-    try:
-        if sys.platform.startswith("linux") and not os.getenv("DISPLAY"):
-            from pyvirtualdisplay import Display
-
-            display = Display(visible=False, size=(1366, 900))
-            display.start()
-        return run_attempts()
-    finally:
-        if display is not None:
-            display.stop()
+    return run_attempts()
 
 
 if __name__ == "__main__":

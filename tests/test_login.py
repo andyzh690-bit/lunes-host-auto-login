@@ -30,7 +30,8 @@ class FakeButton:
     def __init__(self, tab):
         self.tab = tab
 
-    def click(self):
+    def click(self, by_js=False):
+        self.tab.clicked_by_js = by_js
         self.tab.clicks += 1
         if self.tab.clicks >= self.tab.solve_on_click:
             self.tab.solved = True
@@ -83,11 +84,12 @@ class FakeTab:
         self.clicks = 0
         self.solved = False
         self.patch_injected = False
+        self.clicked_by_js = None
         self.response = FakeResponse(FakeFrame(self))
 
     def run_js(self, script):
         if "cf-turnstile-response" in script:
-            return "token" if self.solved else ""
+            return "t" * 64 if self.solved else ""
         return None
 
     def ele(self, _selector, timeout=None):
@@ -112,9 +114,10 @@ class LoginTests(unittest.TestCase):
         self.assertLessEqual(duration, 5)
         self.assertTrue(tab.patch_injected)
         self.assertEqual(tab.clicks, 1)
+        self.assertFalse(tab.clicked_by_js)
 
-    def test_fallback_starts_after_five_second_window(self):
-        tab = FakeTab(solve_on_click=2)
+    def test_turnstile_is_clicked_only_once_while_token_is_pending(self):
+        tab = FakeTab(solve_on_click=99)
         clock = FakeClock()
         with (
             patch.object(login.time, "monotonic", clock.monotonic),
@@ -122,11 +125,10 @@ class LoginTests(unittest.TestCase):
         ):
             solved, duration, mode = login.solve_turnstile(tab)
 
-        self.assertTrue(solved)
-        self.assertEqual(mode, "fallback")
-        self.assertGreaterEqual(duration, 5)
-        self.assertLess(duration, 5.5)
-        self.assertEqual(tab.clicks, 2)
+        self.assertFalse(solved)
+        self.assertEqual(mode, "failed")
+        self.assertGreaterEqual(duration, login.TURNSTILE_TOTAL_TIMEOUT_SECONDS)
+        self.assertEqual(tab.clicks, 1)
 
     def test_extension_manifest_runs_in_all_frames(self):
         manifest_path = login.TURNSTILE_EXTENSION_DIR / "manifest.json"
