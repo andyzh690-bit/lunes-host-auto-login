@@ -59,6 +59,10 @@ ANTI_AUTOMATION_ARGS = (
     "--disable-blink-features=AutomationControlled",
     "--no-first-run",
     "--no-default-browser-check",
+    "--lang=en-US",
+    "--start-maximized",
+    "--disable-infobars",
+    "--disable-popup-blocking",
 )
 
 
@@ -288,6 +292,22 @@ def patch_and_click_turnstile(tab) -> dict:
 
     patch_source = TURNSTILE_PATCH_PATH.read_text(encoding="utf-8")
     challenge_iframe.run_js(patch_source)
+    # 在挑战 iframe 的 main world 内再次抹掉自动化痕迹：
+    # 扩展只补 screenX/Y，这里补齐 webdriver 伪装并随机化 MouseEvent 坐标，
+    # 与已验证可用的 katabump 方案保持一致（挑战 iframe 内 CF 会读这些特征）。
+    try:
+        challenge_iframe.run_js(
+            """
+            try { Object.defineProperty(navigator, 'webdriver', { get: () => false }); } catch(e) {}
+            function getRandomInt(min, max) {
+              return Math.floor(Math.random() * (max - min + 1)) + min;
+            }
+            Object.defineProperty(MouseEvent.prototype, 'screenX', { value: getRandomInt(800, 1200) });
+            Object.defineProperty(MouseEvent.prototype, 'screenY', { value: getRandomInt(400, 600) });
+            """
+        )
+    except Exception:
+        pass
     diagnostics = challenge_iframe.run_js(
         """
         const probe = new MouseEvent('lunes-screenxy-probe', {
@@ -322,6 +342,33 @@ def patch_and_click_turnstile(tab) -> dict:
     return diagnostics if isinstance(diagnostics, dict) else {}
 
 
+def turnstile_diag(tab, tag: str) -> None:
+    """抓取页面与 Turnstile 组件关键状态，便于定位卡点（移植自 katabump）。"""
+    try:
+        info = tab.run_js(
+            """return (() => {
+                const out = { title: document.title, url: location.href };
+                const w = document.querySelector('.cf-turnstile');
+                out.widget = !!w;
+                if (w) {
+                    out.widgetHTML = (w.outerHTML || '').slice(0, 200);
+                    const sr = w.shadowRoot;
+                    out.shadowIframe = !!(sr && sr.querySelector('iframe'));
+                }
+                const resp = document.querySelector('input[name="cf-turnstile-response"]');
+                out.respInput = !!resp;
+                if (resp) out.respValLen = (resp.value || '').length;
+                out.iframeCount = document.querySelectorAll('iframe').length;
+                try { out.tsResp = (typeof turnstile !== 'undefined' && turnstile.getResponse && turnstile.getResponse()) ? 'present' : 'null'; }
+                catch (e) { out.tsResp = 'err:' + e.message; }
+                return out;
+            })()"""
+        )
+        print(f"[TS:{tag}] {info}")
+    except Exception as exc:
+        print(f"[TS:{tag}] diag failed: {exc}")
+
+
 def solve_turnstile(tab) -> tuple[bool, float, str]:
     started = time.monotonic()
     if len(get_turnstile_token(tab)) > 20:
@@ -331,8 +378,17 @@ def solve_turnstile(tab) -> tuple[bool, float, str]:
         "[Turnstile] Starting patched fast path "
         f"({TURNSTILE_FAST_TIMEOUT_SECONDS:g}s)"
     )
+    turnstile_diag(tab, "init")
+
+    # 前置 reset：给 Cloudflare 重新评估的机会（与 katabump 一致）
+    try:
+        tab.run_js("try { turnstile.reset() } catch(e) {}")
+    except Exception:
+        pass
+
     clicked = False
     fast_window_reported = False
+    next_click_at = 0.0
     deadline = started + TURNSTILE_TOTAL_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         token = get_turnstile_token(tab)
@@ -351,25 +407,30 @@ def solve_turnstile(tab) -> tuple[bool, float, str]:
             print("[Turnstile] Five-second window elapsed; continuing token polling")
             fast_window_reported = True
 
-        if clicked:
-            time.sleep(TOKEN_POLL_SECONDS)
-            continue
+        # 每 5 秒重新尝试点击（与 katabump 一致）：首点过早时后续点击可补救
+        if time.monotonic() >= next_click_at:
+            try:
+                diagnostics = patch_and_click_turnstile(tab)
+                print(f"[Turnstile] Iframe patch diagnostics: {diagnostics}")
+                clicked = True
+                time.sleep(1)
+                take_screenshot(tab, FAST_CLICK_SCREENSHOT_PATH)
+            except Exception as exc:
+                print(
+                    f"[Turnstile] Widget context unavailable; retrying: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            next_click_at = time.monotonic() + 5
 
-        try:
-            diagnostics = patch_and_click_turnstile(tab)
-            print(f"[Turnstile] Iframe patch diagnostics: {diagnostics}")
-            clicked = True
-            time.sleep(1)
-            take_screenshot(tab, FAST_CLICK_SCREENSHOT_PATH)
-        except Exception as exc:
-            print(
-                f"[Turnstile] Widget context unavailable; retrying: "
-                f"{type(exc).__name__}: {exc}"
-            )
-            time.sleep(TOKEN_POLL_SECONDS)
+        time.sleep(TOKEN_POLL_SECONDS)
 
     duration = time.monotonic() - started
     print(f"[Turnstile] Token missing after {duration:.2f}s")
+    turnstile_diag(tab, "timeout")
+    if clicked:
+        print("[Turnstile] 已点击复选框但 token 未返回")
+    else:
+        print("[Turnstile] 全程未拿到 token（invisible/flexible 变体或无复选框可点）")
     return False, duration, "failed"
 
 
