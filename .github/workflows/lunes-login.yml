@@ -22,7 +22,6 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       PROXY_URL: ${{ secrets.PROXY_URL }}
       TURNSTILE_FAST_TIMEOUT_SECONDS: '5'
-      BROWSER_PATH: C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
       PYTHONUTF8: '1'
 
     steps:
@@ -40,6 +39,20 @@ jobs:
 
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+
+      - name: Setup pinned Chrome for Testing
+        shell: pwsh
+        run: |
+          # 固定浏览器版本，避免 windows-latest 上 Edge 自动升级导致 CDP/自动化失稳
+          $version = "130.0.6723.116"
+          $url = "https://storage.googleapis.com/chrome-for-testing-public/$version/win64/chrome-win64.zip"
+          Write-Output "[Browser] Downloading Chrome for Testing $version"
+          New-Item -ItemType Directory -Force browser | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile browser/chrome.zip
+          Expand-Archive -LiteralPath browser/chrome.zip -DestinationPath browser -Force
+          $exe = (Resolve-Path browser/chrome-win64/chrome.exe).Path
+          "BROWSER_PATH=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          & $exe --version
 
       - name: Setup proxy and run login automation
         id: login
