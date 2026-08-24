@@ -41,7 +41,7 @@ TURNSTILE_FAST_TIMEOUT_SECONDS = float(
     os.getenv("TURNSTILE_FAST_TIMEOUT_SECONDS", "5")
 )
 TOKEN_POLL_SECONDS = 0.25
-TURNSTILE_TOTAL_TIMEOUT_SECONDS = 35
+TURNSTILE_TOTAL_TIMEOUT_SECONDS = 60
 
 # 反自动化注入：定位 bug 修好后，CF 仍可能因 navigator.webdriver 识别为自动化
 # 而扣发 token。需在导航前把 webdriver 等特征抹掉（screenxy 扩展已覆盖 screenX/Y）。
@@ -427,6 +427,11 @@ def solve_turnstile(tab) -> tuple[bool, float, str]:
     duration = time.monotonic() - started
     print(f"[Turnstile] Token missing after {duration:.2f}s")
     turnstile_diag(tab, "timeout")
+    # 退出前再确认一次：token 常在循环临界点才下发，避免恰好错过
+    token = get_turnstile_token(tab)
+    if len(token) > 20:
+        print(f"[Turnstile] 退出前补读到 token (len={len(token)})")
+        return True, duration, "screenxy_wait"
     if clicked:
         print("[Turnstile] 已点击复选框但 token 未返回")
     else:
