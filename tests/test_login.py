@@ -141,7 +141,9 @@ class LoginTests(unittest.TestCase):
         self.assertFalse(solved)
         self.assertEqual(mode, "failed")
         self.assertGreaterEqual(duration, login.TURNSTILE_TOTAL_TIMEOUT_SECONDS)
-        self.assertEqual(tab.clicks, 1)
+        # 新设计：每 5 秒重新点击（节流），而非只点一次；断言被节流且不无限刷
+        self.assertGreaterEqual(tab.clicks, 2)
+        self.assertLess(tab.clicks, 12)
 
     def test_extension_manifest_runs_in_all_frames(self):
         manifest_path = login.TURNSTILE_EXTENSION_DIR / "manifest.json"
