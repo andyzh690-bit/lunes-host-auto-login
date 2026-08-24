@@ -225,11 +225,46 @@ def patch_and_click_turnstile(tab) -> dict:
     response = tab.ele("@name=cf-turnstile-response", timeout=3)
     if not response:
         raise RuntimeError("turnstile_response_missing")
-    wrapper = response.parent()
-    shadow = wrapper.shadow_root
-    if not shadow:
-        raise RuntimeError("turnstile_shadow_root_missing")
-    challenge_iframe = shadow.ele("tag:iframe", timeout=3)
+
+    # 多策略定位挑战 iframe：不再假设 response.parent() 就是 shadow host。
+    # 隐藏 input 在轻 DOM 中，其直接父节点通常是内层 div，shadow root 实际
+    # 挂在 .cf-turnstile 组件或更外层祖先上（beta 面板改版后尤为常见）。
+    challenge_iframe = None
+    try:
+        node = response.parent()
+        for _ in range(4):                      # a) 向上查找带 shadow root 的祖先
+            if node is None:
+                break
+            sr = getattr(node, "shadow_root", None)
+            if sr:
+                iframe = sr.ele("tag:iframe", timeout=2)
+                if iframe:
+                    challenge_iframe = iframe
+                    break
+            node = node.parent()
+        if not challenge_iframe:                # b) 直接取 .cf-turnstile 组件的 shadow root
+            widget = tab.ele('css:.cf-turnstile', timeout=2)
+            if widget:
+                sr = getattr(widget, "shadow_root", None)
+                if sr:
+                    challenge_iframe = sr.ele("tag:iframe", timeout=2)
+        if not challenge_iframe:                # c) 按 src 匹配 cloudflare/turnstile iframe
+            for sel in (
+                'xpath://iframe[contains(@src, "cloudflare") or contains(@src, "turnstile") or contains(@src, "challenge")]',
+                'css:iframe[src*="challenges.cloudflare.com"]',
+                'css:iframe[src*="turnstile"]',
+                'tag:iframe',
+            ):
+                try:
+                    f = tab.ele(sel, timeout=2)
+                    if f:
+                        challenge_iframe = f
+                        break
+                except Exception:
+                    continue
+    except Exception:
+        challenge_iframe = None
+
     if not challenge_iframe:
         raise RuntimeError("turnstile_iframe_missing")
 
@@ -250,13 +285,21 @@ def patch_and_click_turnstile(tab) -> dict:
         """
     )
 
+    # 定位并点击 checkbox（增加兜底，避免 body shadow 缺失即崩溃）
     body = challenge_iframe.ele("tag:body", timeout=3)
     body_shadow = body.shadow_root if body else None
-    if not body_shadow:
-        raise RuntimeError("turnstile_body_shadow_root_missing")
-    button = body_shadow.ele("tag:input", timeout=3)
+    button = None
+    if body_shadow:
+        button = body_shadow.ele("tag:input", timeout=3) or body_shadow.ele("css:input[type=checkbox]", timeout=3)
+    if not button and body:
+        button = body.ele("tag:input", timeout=3) or body.ele("css:input[type=checkbox]", timeout=3)
     if not button:
-        raise RuntimeError("turnstile_button_missing")
+        try:
+            challenge_iframe.click(by_js=False)          # 兜底：直接点 iframe
+            return diagnostics if isinstance(diagnostics, dict) else {}
+        except Exception:
+            raise RuntimeError("turnstile_button_missing")
+
     button.click(by_js=False)
     return diagnostics if isinstance(diagnostics, dict) else {}
 
