@@ -43,6 +43,24 @@ TURNSTILE_FAST_TIMEOUT_SECONDS = float(
 TOKEN_POLL_SECONDS = 0.25
 TURNSTILE_TOTAL_TIMEOUT_SECONDS = 35
 
+# 反自动化注入：定位 bug 修好后，CF 仍可能因 navigator.webdriver 识别为自动化
+# 而扣发 token。需在导航前把 webdriver 等特征抹掉（screenxy 扩展已覆盖 screenX/Y）。
+STEALTH_INIT_JS = """
+() => {
+  try { Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true }); } catch (e) {}
+  try { Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'], configurable: true }); } catch (e) {}
+  try { Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5], configurable: true }); } catch (e) {}
+  try { Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8, configurable: true }); } catch (e) {}
+  try { if (!window.chrome) { window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){}, app: {} }; } } catch (e) {}
+}
+"""
+
+ANTI_AUTOMATION_ARGS = (
+    "--disable-blink-features=AutomationControlled",
+    "--no-first-run",
+    "--no-default-browser-check",
+)
+
 
 def take_screenshot(tab, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -440,6 +458,8 @@ def run_browser(proxy_server: str) -> tuple[bool, str | None]:
     options = ChromiumOptions(read_file=False).auto_port()
     options.add_extension(str(TURNSTILE_EXTENSION_DIR))
     options.set_argument("--window-size=1440,900")
+    for arg in ANTI_AUTOMATION_ARGS:
+        options.set_argument(arg)
     if BROWSER_PATH:
         options.set_browser_path(BROWSER_PATH)
     if proxy_server:
@@ -452,6 +472,11 @@ def run_browser(proxy_server: str) -> tuple[bool, str | None]:
     try:
         browser = Chromium(options)
         tab = browser.latest_tab
+        try:
+            tab.add_init_js(STEALTH_INIT_JS)
+            print("[Browser] Stealth init-js injected")
+        except Exception as exc:
+            print(f"[Browser] Stealth init-js failed: {exc}")
         try:
             tab.get("https://api.ipify.org/?format=json", retry=0, timeout=20)
             exit_response = page_text(tab)
