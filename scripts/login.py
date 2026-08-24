@@ -243,6 +243,49 @@ def get_turnstile_token(tab) -> str:
         return ""
 
 
+def _find_turnstile_button(iframe):
+    """在挑战 iframe 内递归搜索 shadow root 中的 checkbox（跨浏览器兼容）。
+
+    Turnstile 的 checkbox 可能挂在 body 或某层 div 的 shadow root 之下，
+    不同浏览器/版本 shadow host 位置不定（Edge 常见挂 body，Chrome 可能挂内层 div），
+    故递归下降查找，避免单点假设导致定位失败。
+    """
+    candidates = [iframe]
+    try:
+        body = iframe.ele("tag:body", timeout=2)
+        if body:
+            candidates.append(body)
+    except Exception:
+        pass
+    seen = set()
+    for _ in range(4):
+        nxt = []
+        for node in candidates:
+            try:
+                sr = getattr(node, "shadow_root", None)
+                if sr:
+                    inp = (
+                        sr.ele("tag:input", timeout=1)
+                        or sr.ele("css:input[type=checkbox]", timeout=1)
+                    )
+                    if inp:
+                        return inp
+                    nxt.append(sr)
+            except Exception:
+                pass
+            try:
+                for child in node.eles("tag:div", timeout=1)[:8]:
+                    if id(child) not in seen:
+                        seen.add(id(child))
+                        nxt.append(child)
+            except Exception:
+                pass
+        if not nxt:
+            break
+        candidates = nxt
+    return None
+
+
 def patch_and_click_turnstile(tab) -> dict:
     response = tab.ele("@name=cf-turnstile-response", timeout=3)
     if not response:
@@ -323,22 +366,22 @@ def patch_and_click_turnstile(tab) -> dict:
         """
     )
 
-    # 定位并点击 checkbox（增加兜底，避免 body shadow 缺失即崩溃）
+    # 定位并点击 checkbox（递归搜索 shadow root，跨浏览器兼容）
+    button = _find_turnstile_button(challenge_iframe)
+    if button:
+        button.click(by_js=False)
+        return diagnostics if isinstance(diagnostics, dict) else {}
+
+    # 兜底：点击 iframe / body 中心（覆盖 checkbox 大致位置），不硬失败
     body = challenge_iframe.ele("tag:body", timeout=3)
-    body_shadow = body.shadow_root if body else None
-    button = None
-    if body_shadow:
-        button = body_shadow.ele("tag:input", timeout=3) or body_shadow.ele("css:input[type=checkbox]", timeout=3)
-    if not button and body:
-        button = body.ele("tag:input", timeout=3) or body.ele("css:input[type=checkbox]", timeout=3)
-    if not button:
+    for target in (body, challenge_iframe):
+        if not target:
+            continue
         try:
-            challenge_iframe.click(by_js=False)          # 兜底：直接点 iframe
+            target.click(by_js=False)
             return diagnostics if isinstance(diagnostics, dict) else {}
         except Exception:
-            raise RuntimeError("turnstile_button_missing")
-
-    button.click(by_js=False)
+            continue
     return diagnostics if isinstance(diagnostics, dict) else {}
 
 
